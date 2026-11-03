@@ -1,4 +1,5 @@
-data/
 venv/
 __pycache__/
 *.docx
+data/
+.vscode/
