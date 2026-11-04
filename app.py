@@ -78,7 +78,8 @@ ALERT_PP = 5.0          # rise of >= 5 points AND statistically unusual -> ALERT
 STD_FLOOR = 1.0         # minimum spread (pp) so very flat baselines don't over-react
 
 # Colours (navy and blue scheme)
-NAVY, BLUE, LIGHT_BLUE, BG = "#0B2545", "#1F5FA8", "#8DC3EE", "#F4F7FB"
+NAVY, BLUE, LIGHT_BLUE, BG = "#0F172A", "#1F5FA8", "#8DC3EE", "#F8FAFC"
+INDIGO = "#6366F1"  # primary accent
 THEME_COLOURS = {
     "Job and Money": "#0B2545",
     "Exams and Studies": "#1F5FA8",
@@ -89,44 +90,152 @@ THEME_COLOURS = {
 LINE_COLOURS = ["#0B2545", "#1F78C8", "#4FA3E0", "#2A9D8F", "#E9A23B",
                 "#C8553D", "#5B6B82", "#8DC3EE", "#7A4EAB"]
 
-PAGES = ["Overview", "Stressor Analysis", "Weekly Trends", "Regional Comparison",
-         "Early Warning", "Privacy and Data Quality", "Methodology"]
+# Sidebar navigation: (page name, Material icon)
+NAV_ITEMS = [("Overview", ":material/dashboard:"),
+             ("Stressor Analysis", ":material/bar_chart:"),
+             ("Weekly Trends", ":material/trending_up:"),
+             ("Regional Comparison", ":material/grid_view:"),
+             ("Early Warning", ":material/notifications:"),
+             ("Privacy & Data Quality", ":material/shield:"),
+             ("Methodology", ":material/menu_book:")]
+PAGES = [name for name, _ in NAV_ITEMS]
+
+# Small inline SVG icons (Lucide-style paths) used in cards and banners
+ICON_PATHS = {
+    "activity": '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+    "message": '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    "pin": '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+    "dollar": '<line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+    "bell": '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    "warning": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    "info": '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    "shield": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+}
+
+
+def svg(name: str, size: int = 18) -> str:
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" '
+            f'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+            f'stroke-linejoin="round">{ICON_PATHS[name]}</svg>')
+
 
 CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html, body, .stApp {{ font-family: 'Inter', 'Segoe UI', Roboto, Arial, sans-serif; }}
-.stApp {{ background-color: {BG}; }}
-.block-container {{ padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1250px; }}
-.app-header {{ background: linear-gradient(120deg, {NAVY} 0%, {BLUE} 100%);
-  padding: 1.4rem 1.8rem; border-radius: 14px; margin-bottom: .9rem; }}
-.app-header h1 {{ color: #fff; font-size: 1.9rem; font-weight: 700; margin: 0 0 .25rem 0; padding: 0; }}
-.app-header p {{ color: #D6E6F7; margin: 0; font-size: 1rem; }}
-.demo-banner {{ background: #B42318; color: #fff; padding: .85rem 1.2rem; border-radius: 10px;
-  font-weight: 700; font-size: .98rem; border-left: 8px solid #FDB022;
-  margin-bottom: 1.2rem; line-height: 1.4; }}
-.kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem; margin: .5rem 0 1.2rem 0; }}
-.kpi-card {{ background: #fff; border-radius: 12px; padding: 1rem 1.2rem; border: 1px solid #D9E3F0;
-  border-top: 4px solid {BLUE}; box-shadow: 0 1px 3px rgba(11,37,69,.08); }}
-.kpi-label {{ color: #5B6B82; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }}
-.kpi-value {{ color: {NAVY}; font-size: 1.65rem; font-weight: 700; margin-top: .25rem; line-height: 1.2; }}
-.kpi-note {{ color: #5B6B82; font-size: .8rem; margin-top: .2rem; }}
-.alert-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 1rem; margin-top: .5rem; }}
-.alert-card {{ background: #fff; border-radius: 12px; padding: 1rem 1.2rem; border: 1px solid #D9E3F0;
-  box-shadow: 0 1px 3px rgba(11,37,69,.08); }}
-.alert-card.alert {{ border-left: 6px solid #D92D20; }}
-.alert-card.watch {{ border-left: 6px solid #F79009; }}
+html, body, .stApp, button, input, select, textarea {{ font-family: 'Inter', 'Segoe UI', Roboto, Arial, sans-serif; }}
+.stApp {{ background-color: {BG}; color: {NAVY}; }}
+header[data-testid="stHeader"] {{ background: transparent; }}
+[data-testid="stAppDeployButton"] {{ display: none; }}
+.block-container {{ padding: 0 2rem 3rem 2rem; max-width: 100%; }}
+
+/* ---------- Top bar and banner ---------- */
+.topbar {{ background: #fff; border-bottom: 1px solid #E2E8F0; margin: 0 -2rem 1.5rem -2rem;
+  padding: 1.1rem 4.5rem 1.1rem 2rem; display: flex; align-items: center;
+  justify-content: space-between; gap: 1rem; flex-wrap: wrap; }}
+.topbar-title {{ font-size: 1.3rem; font-weight: 600; color: {NAVY}; line-height: 1.3; }}
+.topbar-sub {{ color: #64748B; font-size: .88rem; }}
+.demo-pill {{ display: inline-flex; align-items: center; gap: .5rem; background: #FFFBEB; border: 1px solid #FDE68A;
+  color: #92400E; border-radius: 999px; padding: .35rem .85rem; font-size: .78rem; }}
+.demo-pill b {{ font-weight: 600; }}
+.demo-pill .dot {{ width: 6px; height: 6px; border-radius: 50%; background: #D97706; }}
+.demo-banner {{ display: flex; align-items: center; gap: .75rem; background: #FFFBEB; border: 1px solid #FDE68A;
+  color: #92400E; border-radius: 10px; padding: .8rem 1rem; font-size: .92rem; line-height: 1.4; margin-bottom: 1.4rem; }}
+.demo-banner svg {{ flex-shrink: 0; }}
+.page-head {{ display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
+  gap: .5rem; margin: .2rem 0 1rem 0; }}
+.page-title {{ font-size: 1.1rem; font-weight: 600; color: {NAVY}; }}
+.page-meta {{ color: #64748B; font-size: .82rem; }}
+.section-note {{ color: #64748B; font-size: .88rem; }}
+
+/* ---------- KPI cards ---------- */
+.kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.1rem; margin: 0 0 1.4rem 0; }}
+.kpi-card {{ background: #fff; border: 1px solid #E2E8F0; border-radius: 12px; padding: 1.1rem 1.25rem;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04); display: flex; flex-direction: column;
+  justify-content: space-between; min-height: 140px; }}
+.kpi-card.primary {{ border-top: 3px solid {INDIGO}; box-shadow: 0 4px 14px rgba(99,102,241,.14); }}
+.kpi-top {{ display: flex; justify-content: space-between; align-items: center; gap: .5rem; }}
+.kpi-label {{ color: #334155; font-size: .88rem; font-weight: 500; }}
+.kpi-icon {{ width: 32px; height: 32px; border-radius: 8px; background: #F1F5F9; color: #64748B;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
+.kpi-icon.indigo {{ background: #EEF2FF; color: {INDIGO}; }}
+.kpi-icon.coral {{ background: #FFF1F2; color: #E11D48; }}
+.kpi-value {{ color: {NAVY}; font-size: 2rem; font-weight: 700; line-height: 1.2; margin-top: .7rem; }}
+.kpi-value.text {{ font-size: 1.4rem; font-weight: 600; margin-top: .9rem; }}
+.kpi-value .of {{ color: #94A3B8; font-size: 1rem; font-weight: 500; margin-left: .25rem; }}
+.kpi-note {{ color: #64748B; font-size: .8rem; margin-top: .55rem; }}
+.progress {{ height: 3px; background: #E2E8F0; border-radius: 3px; margin-top: .75rem; overflow: hidden; }}
+.progress > div {{ height: 100%; background: {BLUE}; border-radius: 3px; }}
+.pill {{ display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 600;
+  padding: .15rem .6rem; border-radius: 999px; margin-top: .55rem; }}
+.pill.coral {{ background: #FFF1F2; color: #BE123C; border: 1px solid #FECDD3; }}
+.pill.grey {{ background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; }}
+.pill .dot {{ width: 6px; height: 6px; border-radius: 50%; background: currentColor; }}
+
+/* ---------- Information callout ---------- */
+.callout {{ display: flex; gap: 1rem; background: #fff; border: 1px solid #E2E8F0; border-left: 4px solid {INDIGO};
+  border-radius: 12px; padding: 1.2rem 1.4rem; box-shadow: 0 1px 2px rgba(15,23,42,.04); }}
+.callout-icon {{ width: 32px; height: 32px; border-radius: 8px; background: #EEF2FF; color: {INDIGO};
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
+.callout-title {{ font-weight: 600; color: {NAVY}; margin-bottom: .5rem; }}
+.callout-text {{ color: #334155; font-size: .95rem; line-height: 1.5; }}
+.disclaimer {{ display: inline-flex; align-items: center; gap: .5rem; background: #F1F5F9; border-radius: 8px;
+  padding: .4rem .8rem; color: #64748B; font-style: italic; font-size: .82rem; margin-top: .8rem; }}
+
+/* ---------- Alert cards ---------- */
+.alert-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 1.1rem; margin-top: .5rem; }}
+.alert-card {{ background: #fff; border-radius: 12px; padding: 1rem 1.2rem; border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04); }}
+.alert-card.alert {{ border-left: 5px solid #E11D48; }}
+.alert-card.watch {{ border-left: 5px solid #F59E0B; }}
 .badge {{ display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .05em;
   padding: .18rem .55rem; border-radius: 999px; color: #fff; }}
-.badge.alert {{ background: #D92D20; }}
-.badge.watch {{ background: #F79009; }}
-.alert-title {{ color: {NAVY}; font-weight: 700; font-size: 1.02rem; margin: .5rem 0 .6rem 0; }}
+.badge.alert {{ background: #E11D48; }}
+.badge.watch {{ background: #D97706; }}
+.alert-title {{ color: {NAVY}; font-weight: 600; font-size: 1.02rem; margin: .5rem 0 .6rem 0; }}
 .metric-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: .45rem .8rem; }}
-.metric-label {{ color: #5B6B82; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; }}
+.metric-label {{ color: #64748B; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; }}
 .metric-value {{ color: {NAVY}; font-weight: 600; font-size: .98rem; }}
-.sim-tag {{ color: #5B6B82; font-size: .72rem; margin-top: .7rem; font-style: italic; }}
-.section-note {{ color: #5B6B82; font-size: .88rem; }}
+.sim-tag {{ color: #64748B; font-size: .72rem; margin-top: .7rem; font-style: italic; }}
+
+/* ---------- Dark sidebar ---------- */
+section[data-testid="stSidebar"], section[data-testid="stSidebar"] > div {{ background: {NAVY}; }}
+section[data-testid="stSidebar"][aria-expanded="true"] {{ min-width: 264px; max-width: 264px; width: 264px; }}
+section[data-testid="stSidebar"] {{ border-right: 1px solid #1E293B; }}
+[data-testid="stSidebarHeader"] {{ height: 0; min-height: 0; padding: 0; margin: 0; }}
+[data-testid="stSidebarCollapseButton"] {{ position: absolute; top: 1.05rem; right: .8rem; z-index: 10; }}
+[data-testid="stSidebarCollapseButton"] button, [data-testid="stSidebarCollapseButton"] svg {{ color: #94A3B8; }}
+[data-testid="stSidebarUserContent"] {{ padding: 1.1rem .9rem 1.5rem .9rem; }}
+.brand {{ display: flex; align-items: center; gap: .7rem; padding: .1rem .4rem 1.1rem .4rem; }}
+.brand-icon {{ width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, {INDIGO}, #8B5CF6);
+  color: #fff; display: flex; align-items: center; justify-content: center; }}
+.brand-name {{ color: #fff; font-weight: 600; font-size: 1rem; }}
+section[data-testid="stSidebar"] .stButton > button {{ width: 100%; justify-content: flex-start; background: transparent;
+  border: none; border-left: 3px solid transparent; border-radius: 8px; color: #CBD5E1; font-weight: 500;
+  font-size: .9rem; padding: .5rem .75rem; box-shadow: none; }}
+section[data-testid="stSidebar"] .stButton > button > div {{ justify-content: flex-start; width: 100%; }}
+section[data-testid="stSidebar"] .stButton > button:hover {{ background: #1E293B; color: #fff; }}
+section[data-testid="stSidebar"] .stButton > button[kind="primary"],
+section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {{
+  background: #1E293B; color: #fff; border-left: 3px solid {INDIGO}; }}
+.sidebar-spacer {{ height: 2.5rem; }}
+.filter-head {{ color: #94A3B8; font-size: .75rem; font-weight: 500; padding-top: .35rem; }}
+.st-key-reset_filters button {{ width: auto !important; margin-left: auto; color: #94A3B8 !important;
+  font-size: .75rem !important; padding: .2rem 0 !important; border-left: none !important; background: transparent !important; }}
+.filter-label {{ display: flex; justify-content: space-between; color: #E2E8F0; font-size: .82rem;
+  font-weight: 500; margin: .9rem 0 .4rem 0; }}
+.filter-label span {{ color: #64748B; font-size: .75rem; }}
+/* chip toggles (st.pills) */
+section[data-testid="stSidebar"] [data-testid="stBaseButton-pills"],
+section[data-testid="stSidebar"] button[kind="pills"] {{ background: transparent; border: 1px solid #334155;
+  color: #CBD5E1; border-radius: 999px; font-size: .72rem; padding: .05rem .65rem; min-height: 1.75rem; }}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-pillsActive"],
+section[data-testid="stSidebar"] button[kind="pillsActive"] {{ background: rgba(99,102,241,.18);
+  border: 1px solid {INDIGO}; color: #E0E7FF; border-radius: 999px; font-size: .72rem;
+  padding: .05rem .65rem; min-height: 1.75rem; }}
+section[data-testid="stSidebar"] [data-testid="stThumbValue"],
+section[data-testid="stSidebar"] [data-testid="stTickBarMin"],
+section[data-testid="stSidebar"] [data-testid="stTickBarMax"] {{ color: #CBD5E1; }}
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {{ color: #64748B; }}
 </style>
 """
 
@@ -378,11 +487,46 @@ def build_heatmap(filtered: pd.DataFrame, provinces: list, themes: list):
 def kpi_cards(cards: list) -> None:
     """cards = list of (label, value, note). Rendered as a responsive grid."""
     items = "".join(
-        f'<div class="kpi-card"><div class="kpi-label">{html.escape(str(l))}</div>'
-        f'<div class="kpi-value">{html.escape(str(v))}</div>'
+        f'<div class="kpi-card"><div><div class="kpi-top"><div class="kpi-label">{html.escape(str(l))}</div></div>'
+        f'<div class="kpi-value">{html.escape(str(v))}</div></div>'
         f'<div class="kpi-note">{html.escape(str(n))}</div></div>'
         for l, v, n in cards)
     st.markdown(f'<div class="kpi-grid">{items}</div>', unsafe_allow_html=True)
+
+
+def kpi_card_html(label: str, icon: str, value: str, extra: str = "",
+                  card_cls: str = "", icon_cls: str = "", value_cls: str = "") -> str:
+    """One Overview KPI card: label + icon chip, big value, and an extra line."""
+    return (f'<div class="kpi-card {card_cls}"><div><div class="kpi-top"><div class="kpi-label">{label}</div>'
+            f'<div class="kpi-icon {icon_cls}">{svg(icon, 16)}</div></div>'
+            f'<div class="kpi-value {value_cls}">{value}</div></div><div>{extra}</div></div>')
+
+
+def page_header(title: str, ctx: dict) -> None:
+    """Page title on the left, week context on the right."""
+    meta = ""
+    if ctx.get("weeks"):
+        weeks = ctx["weeks"]
+        if title == "Overview":
+            meta = week_label(ctx["end_week"])
+        elif len(weeks) > 1:
+            meta = f"{week_label(weeks[0])} \u2013 {week_label(weeks[-1])}"
+        else:
+            meta = week_label(weeks[0])
+        meta += " &middot; Released cells only"
+    st.markdown(f'<div class="page-head"><div class="page-title">{html.escape(title)}</div>'
+                f'<div class="page-meta">{meta}</div></div>', unsafe_allow_html=True)
+
+
+def render_topbar_and_banner() -> None:
+    st.markdown(
+        '<div class="topbar"><div><div class="topbar-title">Community Mental-Wellbeing Signal Tracker</div>'
+        '<div class="topbar-sub">Regional Early-Warning and Stressor Monitoring System &ndash; Sri Lanka</div></div>'
+        '<div class="demo-pill"><span class="dot"></span><b>Demonstration mode</b>'
+        '<span>Synthetic data</span></div></div>'
+        f'<div class="demo-banner">{svg("warning", 18)}<div><b>Demonstration mode &ndash; synthetic data.</b> '
+        'All results are simulated and do not represent actual population conditions.</div></div>',
+        unsafe_allow_html=True)
 
 
 def alert_cards(alerts: pd.DataFrame) -> None:
@@ -420,31 +564,45 @@ def show_chart(fig) -> None:
 # =========================================================================
 
 def page_overview(ctx: dict) -> None:
-    st.subheader("Overview")
+    page_header("Overview", ctx)
     vis = visible_only(ctx["filtered"])
     totals = vis.groupby("theme")["response_count"].sum().sort_values(ascending=False)
     if totals.empty or totals.sum() == 0:
         dominant, note = "Not available", "All selected cells are suppressed"
     else:
         dominant = totals.index[0]
-        note = f"{100 * totals.iloc[0] / totals.sum():.1f}% of released responses"
+        note = f"{100 * totals.iloc[0] / totals.sum():.1f}% of responses"
     n_alerts = int((ctx["alerts"]["status"].astype(str).str.upper() == "ALERT").sum())
-    kpi_cards([
-        ("Total synthetic responses", f"{totals.sum():,.0f}", "Released cells only (groups of 10 or more)"),
-        ("Provinces", len(ctx["provinces"]), f"of {len(ctx['all_provinces'])} in the dataset"),
-        ("Dominant stressor", dominant, note),
-        ("Simulated alerts", n_alerts, f"Current: {week_label(ctx['end_week'])}"),
-    ])
+    n_sel, n_all = len(ctx["provinces"]), len(ctx["all_provinces"])
+    coverage = 100 * n_sel / n_all if n_all else 0
+
+    alert_badge = (f'<span class="pill coral"><span class="dot"></span>{html.escape(week_label(ctx["end_week"]))} active</span>'
+                   if n_alerts else '<span class="pill grey"><span class="dot"></span>None this week</span>')
+    cards = [
+        kpi_card_html("Total synthetic responses", "message", f"{totals.sum():,.0f}",
+                      '<div class="kpi-note">Released cells only</div>'),
+        kpi_card_html("Provinces included", "pin", f'{n_sel} <span class="of">/ {n_all}</span>',
+                      f'<div class="progress"><div style="width:{coverage:.0f}%"></div></div>'
+                      f'<div class="kpi-note">{"Complete coverage" if n_sel == n_all else f"{coverage:.0f}% of provinces selected"}</div>'),
+        kpi_card_html("Dominant stressor", "dollar", html.escape(str(dominant)),
+                      f'<div class="kpi-note">{html.escape(note)}</div>',
+                      card_cls="primary", icon_cls="indigo", value_cls="text"),
+        kpi_card_html("Simulated alerts", "bell", str(n_alerts), alert_badge, icon_cls="coral"),
+    ]
+    st.markdown(f'<div class="kpi-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
     st.markdown(
-        "This dashboard helps regional wellbeing planners monitor **changes in community "
-        "stressors** using aggregated, anonymised and **synthetic** data. Use the sidebar "
-        "to choose provinces, themes and a week range, then explore the pages above."
-    )
-    st.caption("It reports stressor themes only. It gives no diagnoses and no treatment advice.")
+        f'<div class="callout"><div class="callout-icon">{svg("info", 18)}</div><div>'
+        '<div class="callout-title">What this tool shows</div>'
+        '<div class="callout-text">Monitors changes in community stressors using aggregated, anonymized, '
+        'and synthetic data.</div>'
+        f'<div class="disclaimer">{svg("shield", 14)}Reports stressor themes only. '
+        'Does not provide clinical diagnoses or treatment advice.</div></div></div>',
+        unsafe_allow_html=True)
 
 
 def page_stressors(ctx: dict) -> None:
-    st.subheader("Stressor Analysis")
+    page_header("Stressor Analysis", ctx)
     st.markdown('<p class="section-note">Share of released responses by stressor theme '
                 'for the current filters.</p>', unsafe_allow_html=True)
     fig = build_donut(ctx["filtered"], ctx["themes"])
@@ -455,7 +613,7 @@ def page_stressors(ctx: dict) -> None:
 
 
 def page_trends(ctx: dict) -> None:
-    st.subheader("Weekly Trend Analysis")
+    page_header("Weekly Trend Analysis", ctx)
     theme = st.selectbox("Select a theme", ctx["themes"])
     if len(ctx["weeks"]) < 2:
         st.info("Select a range of at least two weeks in the sidebar to see a trend.")
@@ -469,7 +627,7 @@ def page_trends(ctx: dict) -> None:
 
 
 def page_regional(ctx: dict) -> None:
-    st.subheader("Regional Comparison")
+    page_header("Regional Comparison", ctx)
     st.markdown('<p class="section-note">Average weekly percentage share of each theme by '
                 'province, over the selected weeks. Privacy suppression is applied first.</p>',
                 unsafe_allow_html=True)
@@ -481,7 +639,7 @@ def page_regional(ctx: dict) -> None:
 
 
 def page_alerts(ctx: dict) -> None:
-    st.subheader("Early Warning System")
+    page_header("Early Warning System", ctx)
     st.warning("All alerts below are SIMULATED from synthetic data. They do not describe real communities.")
     st.markdown(
         f"Compared with the previous baseline (mean of up to {BASELINE_WEEKS} weeks before "
@@ -495,7 +653,7 @@ def page_alerts(ctx: dict) -> None:
 
 
 def page_privacy(ctx: dict) -> None:
-    st.subheader("Privacy and Data Quality")
+    page_header("Privacy & Data Quality", ctx)
     s, q = ctx["summary"], ctx["quality"]
     kpi_cards([
         ("Minimum group size (k)", K, "Cells below this are hidden"),
@@ -528,7 +686,7 @@ def page_privacy(ctx: dict) -> None:
 
 
 def page_methodology(ctx: dict) -> None:
-    st.subheader("Methodology")
+    page_header("Methodology", ctx)
     st.markdown(f"""
 **Data generation.** All data is synthetic. It is created by `generate_data.py` (or a small
 built-in simulator if that module is unavailable) for 9 provinces, 12 weeks and 5 themes.
@@ -561,18 +719,48 @@ this is a demonstration of method, not a source of findings about real communiti
 # 7. MAIN APP
 # =========================================================================
 
+def go_to(page: str) -> None:
+    """Button callback: remember which page is open."""
+    st.session_state["page"] = page
+
+
+def reset_filters(provinces: list, themes: list, weeks: list) -> None:
+    """Button callback: put every filter back to its default."""
+    st.session_state["f_prov"] = list(provinces)
+    st.session_state["f_theme"] = list(themes)
+    if len(weeks) > 1:
+        st.session_state["f_week"] = (weeks[0], weeks[-1])
+
+
+def nav_button(name: str, icon: str, active: bool) -> None:
+    kwargs = dict(key=f"nav_{name}", on_click=go_to, args=(name,),
+                  type="primary" if active else "secondary")
+    try:
+        st.sidebar.button(name, icon=icon, **kwargs)
+    except TypeError:  # older Streamlit without button icons
+        st.sidebar.button(name, **kwargs)
+
+
+def chip_filter(title: str, options: list, key: str, all_label: bool = False) -> list:
+    """Chip toggles (st.pills) for a multi-select filter, with a '9 of 9' style counter."""
+    st.session_state.setdefault(key, list(options))
+    n = len(st.session_state[key])
+    count = "All" if (all_label and n == len(options)) else f"{n} of {len(options)}"
+    st.sidebar.markdown(f'<div class="filter-label">{html.escape(title)}<span>{count}</span></div>',
+                        unsafe_allow_html=True)
+    if hasattr(st, "pills"):
+        chosen = st.sidebar.pills(title, options, selection_mode="multi", key=key,
+                                  label_visibility="collapsed") or []
+    else:  # older Streamlit: plain multiselect instead of chips
+        chosen = st.sidebar.multiselect(title, options, key=key, label_visibility="collapsed")
+    return [o for o in options if o in chosen]
+
+
 def main() -> None:
     st.set_page_config(page_title="Community Mental-Wellbeing Signal Tracker",
                        layout="wide", initial_sidebar_state="expanded")
     st.markdown(CSS, unsafe_allow_html=True)
-
-    # ---- Header and permanent demonstration warning ----
-    st.markdown(
-        '<div class="app-header"><h1>Community Mental-Wellbeing Signal Tracker</h1>'
-        '<p>Regional Early-Warning and Stressor Monitoring System &ndash; Sri Lanka</p></div>'
-        '<div class="demo-banner">DEMONSTRATION MODE &ndash; SYNTHETIC DATA. All results are '
-        'simulated and do not represent actual population conditions.</div>',
-        unsafe_allow_html=True)
+    render_topbar_and_banner()
 
     # ---- Load privacy-safe data ----
     try:
@@ -590,16 +778,28 @@ def main() -> None:
                   + sorted(set(safe["theme"]) - set(THEMES)))
     week_order = sorted(safe["week"].unique().tolist(), key=_natural_key)
 
-    # ---- Sidebar: navigation + filters ----
-    st.sidebar.markdown("### Navigation")
-    page = st.sidebar.radio("Go to", PAGES, label_visibility="collapsed")
-    st.sidebar.markdown("### Filters")
-    provinces = st.sidebar.multiselect("Province", all_provinces, default=all_provinces)
-    themes = st.sidebar.multiselect("Theme", all_themes, default=all_themes)
+    # ---- Sidebar: brand, navigation, filters ----
+    st.session_state.setdefault("page", "Overview")
+    page = st.session_state["page"]
+    st.sidebar.markdown(f'<div class="brand"><div class="brand-icon">{svg("activity", 18)}</div>'
+                        '<div class="brand-name">Signal Tracker</div></div>', unsafe_allow_html=True)
+    for name, icon in NAV_ITEMS:
+        nav_button(name, icon, active=(name == page))
+
+    st.sidebar.markdown('<div class="sidebar-spacer"></div>', unsafe_allow_html=True)
+    head_left, head_right = st.sidebar.columns([1, 1])
+    head_left.markdown('<div class="filter-head">Filters</div>', unsafe_allow_html=True)
+    head_right.button("Reset", key="reset_filters", on_click=reset_filters,
+                      args=(all_provinces, all_themes, week_order))
+
+    provinces = chip_filter("Province", all_provinces, "f_prov")
+    themes = chip_filter("Theme", all_themes, "f_theme", all_label=True)
+
     if len(week_order) > 1:
+        st.sidebar.markdown('<div class="filter-label">Week range<span></span></div>', unsafe_allow_html=True)
         start, end = st.sidebar.select_slider("Week range", options=week_order,
-                                              value=(week_order[0], week_order[-1]),
-                                              format_func=week_label)
+                                              value=(week_order[0], week_order[-1]), key="f_week",
+                                              format_func=week_label, label_visibility="collapsed")
     else:
         start = end = week_order[0]
     st.sidebar.caption(f"Data source: {quality['source']}")
@@ -627,7 +827,7 @@ def main() -> None:
 
     {"Overview": page_overview, "Stressor Analysis": page_stressors,
      "Weekly Trends": page_trends, "Regional Comparison": page_regional,
-     "Early Warning": page_alerts, "Privacy and Data Quality": page_privacy}[page](ctx)
+     "Early Warning": page_alerts, "Privacy & Data Quality": page_privacy}[page](ctx)
 
     st.caption("DEMONSTRATION MODE - SYNTHETIC DATA. No raw responses or individual records are shown.")
 
