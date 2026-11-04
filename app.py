@@ -219,7 +219,7 @@ section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-pr
   background: #1E293B; color: #fff; border-left: 3px solid {INDIGO}; }}
 .sidebar-spacer {{ height: 2.5rem; }}
 .filter-head {{ color: #94A3B8; font-size: .75rem; font-weight: 500; padding-top: .35rem; }}
-.st-key-reset_filters button {{ width: auto !important; margin-left: auto; color: #94A3B8 !important;
+.st-key-reset_filters button {{ width: auto !important; margin-left: auto; margin-right: -0.4rem !important; color: #94A3B8 !important;
   font-size: .75rem !important; padding: .2rem 0 !important; border-left: none !important; background: transparent !important; }}
 .filter-label {{ display: flex; justify-content: space-between; color: #E2E8F0; font-size: .82rem;
   font-weight: 500; margin: .9rem 0 .4rem 0; }}
@@ -725,11 +725,11 @@ def go_to(page: str) -> None:
 
 
 def reset_filters(provinces: list, themes: list, weeks: list) -> None:
-    """Button callback: put every filter back to its default."""
-    st.session_state["f_prov"] = list(provinces)
-    st.session_state["f_theme"] = list(themes)
-    if len(weeks) > 1:
-        st.session_state["f_week"] = (weeks[0], weeks[-1])
+    """Button callback: put every filter back to its default by clearing session state."""
+    # Remove the keys so widgets revert to their clean default states
+    st.session_state.pop("f_prov", None)
+    st.session_state.pop("f_theme", None)
+    st.session_state.pop("f_week", None)
 
 
 def nav_button(name: str, icon: str, active: bool) -> None:
