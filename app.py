@@ -1,7 +1,7 @@
 """
 app.py - Community Mental-Wellbeing Signal Tracker (Streamlit dashboard)
 =========================================================================
-Regional Early-Warning and Stressor Monitoring System — Western Province, Sri Lanka.
+Regional Early-Warning and Stressor Monitoring System — Sri Lanka.
 
 DEMONSTRATION MODE: All data is retrieved from Supabase and is SYNTHETIC.
 """
@@ -18,6 +18,7 @@ import streamlit as st
 from scipy import stats
 
 import database
+import geography
 import privacy  # k-anonymity-style small-cell suppression (k = 10)
 
 try:
@@ -31,13 +32,13 @@ except Exception:  # noqa: BLE001
 # =========================================================================
 
 ALERT_FUNCTION_NAME = "detect_alerts"
-ALERT_COLUMNS = ["province", "theme", "baseline_pct", "current_pct",
+ALERT_COLUMNS = ["region", "theme", "baseline_pct", "current_pct",
                  "change_pp", "response_count", "status"]
 
 K = privacy.K_THRESHOLD  # minimum group size (10)
 
-# Restricted strictly to Western Province Districts
-DISTRICTS = ["Colombo", "Gampaha", "Kalutara"]
+PROVINCES = list(geography.PROVINCES)
+DISTRICTS = list(geography.DISTRICTS)
 THEMES = ["Job and Money", "Exams and Studies", "Loneliness and Isolation",
           "Family and Relationships", "Other"]
 NUM_WEEKS = 12
@@ -253,54 +254,37 @@ section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {{ color: #6
 # 2. SUPABASE DATA LOADING & TRANSFORMATION LAYER
 # =========================================================================
 
-@st.cache_data(show_spinner="Connecting to Supabase and loading 5,000 synthetic records...")
-def load_supabase_data() -> tuple[pd.DataFrame, dict, dict]:
+@st.cache_data(
+    show_spinner="Connecting to Supabase and applying privacy suppression...",
+    ttl=300,
+    max_entries=2,
+)
+def load_supabase_data(geography_level: str = "province") -> tuple[pd.DataFrame, dict, dict]:
     """
     Fetch records from Supabase wellbeing_responses table, apply transformation layer
-    (district -> province, week_number -> week, is_synthetic -> data_type), and pass
-    through privacy suppression.
+    into province- and district-level aggregates. Both levels are privacy
+    filtered together so their totals cannot expose one suppressed district.
     """
     raw_records = database.fetch_responses()
     if not raw_records:
         raise ValueError("No records returned from Supabase table public.wellbeing_responses.")
 
     df = pd.DataFrame(raw_records)
-
-    # Transformation layer mapping Supabase schema to analysis/app expectations
-    df = df.rename(columns={
-        "id": "response_id",
-        "week_number": "week"
-    })
-    
-    # Map district to province so regional breakdown operates across Colombo, Gampaha, Kalutara
-    if "district" in df.columns:
-        df["province"] = df["district"]
-
-    df["data_type"] = "synthetic"
-    df["response_date"] = pd.to_datetime(df["response_date"], errors="coerce")
-
-    # Aggregate record-level data into province-week-theme counts and percentages
-    agg = (
-        df.groupby(["province", "week", "theme"])
-        .size()
-        .rename("response_count")
-        .reset_index()
+    safe_provinces, safe_districts, province_summary, district_summary = (
+        privacy.aggregate_response_levels(df)
     )
-    totals = agg.groupby(["province", "week"])["response_count"].transform("sum")
-    agg["percentage_share"] = (100 * agg["response_count"] / totals).round(1)
+    if geography_level == "province":
+        safe, summary = safe_provinces, province_summary
+    elif geography_level == "district":
+        safe, summary = safe_districts, district_summary
+    else:
+        raise ValueError("geography_level must be 'province' or 'district'.")
 
-    expected = agg["province"].nunique() * agg["week"].nunique() * agg["theme"].nunique()
-    valid = agg.dropna(subset=["response_count", "percentage_share"])
-    quality = {
-        "expected_cells": int(expected),
-        "missing_cells": int(max(expected - len(valid), 0)),
-        "source": "Supabase database (public.wellbeing_responses)",
-        "total_records": len(df)
-    }
-
-    # PRIVACY STEP: apply k-anonymity suppression (k = 10)
-    safe, summary = privacy.apply_privacy_filter(agg)
     safe["response_count"] = safe["response_count"].astype(float)
+    quality = {
+        "source": "Supabase database (public.wellbeing_responses)",
+        "total_records": len(df),
+    }
     return safe, summary, quality
 
 
@@ -340,9 +324,9 @@ def builtin_alerts(df: pd.DataFrame, end_week, week_order: list) -> pd.DataFrame
     visible = visible_only(df)
     pos = week_order.index(end_week)
     base_weeks = week_order[max(0, pos - BASELINE_WEEKS):pos]
-    current = visible[visible["week"] == end_week].set_index(["province", "theme"])
+    current = visible[visible["week"] == end_week].set_index(["region", "theme"])
     base = (visible[visible["week"].isin(base_weeks)]
-            .groupby(["province", "theme"])["percentage_share"]
+            .groupby(["region", "theme"])["percentage_share"]
             .agg(["mean", "std", "count"]))
     if current.empty or base.empty:
         return empty
@@ -364,7 +348,7 @@ def builtin_alerts(df: pd.DataFrame, end_week, week_order: list) -> pd.DataFrame
             status = "WATCH"
         else:
             continue
-        rows.append({"province": key[0], "theme": key[1],
+        rows.append({"region": key[0], "theme": key[1],
                      "baseline_pct": float(b["mean"]),
                      "current_pct": float(cur["percentage_share"]),
                      "change_pp": float(change),
@@ -381,9 +365,12 @@ def builtin_alerts(df: pd.DataFrame, end_week, week_order: list) -> pd.DataFrame
 def compute_alerts(df: pd.DataFrame, end_week, week_order: list):
     if analysis is not None and hasattr(analysis, ALERT_FUNCTION_NAME):
         try:
-            out = getattr(analysis, ALERT_FUNCTION_NAME)(df.copy(), end_week)
-            if isinstance(out, pd.DataFrame) and set(ALERT_COLUMNS) <= set(out.columns):
-                return out[ALERT_COLUMNS].reset_index(drop=True), "analysis.py"
+            analysis_input = df.rename(columns={"region": "province"})
+            out = getattr(analysis, ALERT_FUNCTION_NAME)(analysis_input.copy(), end_week)
+            if isinstance(out, pd.DataFrame):
+                out = out.rename(columns={"province": "region"})
+                if set(ALERT_COLUMNS) <= set(out.columns):
+                    return out[ALERT_COLUMNS].reset_index(drop=True), "analysis.py"
         except Exception:  # noqa: BLE001
             pass
     return builtin_alerts(df, end_week, week_order), "built-in detector"
@@ -418,19 +405,19 @@ def build_donut(filtered: pd.DataFrame, themes: list):
     return style_figure(fig, 480)
 
 
-def build_trend(filtered: pd.DataFrame, theme: str, provinces: list, weeks: list):
+def build_trend(filtered: pd.DataFrame, theme: str, regions: list, weeks: list):
     sub = filtered[filtered["theme"] == theme]
-    pct = sub.pivot(index="week", columns="province", values="percentage_share").reindex(weeks)
-    cnt = sub.pivot(index="week", columns="province", values="response_count").reindex(weeks)
+    pct = sub.pivot(index="week", columns="region", values="percentage_share").reindex(weeks)
+    cnt = sub.pivot(index="week", columns="region", values="response_count").reindex(weeks)
     labels = [week_label(w) for w in weeks]
     fig = go.Figure()
-    for i, prov in enumerate(p for p in provinces if p in pct.columns):
+    for i, region in enumerate(p for p in regions if p in pct.columns):
         fig.add_trace(go.Scatter(
-            x=labels, y=pct[prov].astype(float), name=prov, mode="lines+markers",
+            x=labels, y=pct[region].astype(float), name=region, mode="lines+markers",
             connectgaps=False,
             line=dict(color=LINE_COLOURS[i % len(LINE_COLOURS)], width=2.5),
-            customdata=cnt[prov].astype(float),
-            hovertemplate="%{x}<br>" + prov + ": %{y:.1f}% (n=%{customdata:,.0f})<extra></extra>"))
+            customdata=cnt[region].astype(float),
+            hovertemplate="%{x}<br>" + region + ": %{y:.1f}% (n=%{customdata:,.0f})<extra></extra>"))
     fig.update_layout(yaxis=dict(title="Percentage share (%)", ticksuffix="%", rangemode="tozero",
                                  gridcolor="#DCE6F2"),
                       xaxis=dict(type="category", categoryorder="array", categoryarray=labels),
@@ -438,14 +425,14 @@ def build_trend(filtered: pd.DataFrame, theme: str, provinces: list, weeks: list
     return style_figure(fig, 480)
 
 
-def build_heatmap(filtered: pd.DataFrame, provinces: list, themes: list):
+def build_heatmap(filtered: pd.DataFrame, regions: list, themes: list):
     vis = visible_only(filtered)
-    grid = (vis.groupby(["province", "theme"])["percentage_share"].mean()
-               .unstack().reindex(index=provinces, columns=themes))
+    grid = (vis.groupby(["region", "theme"])["percentage_share"].mean()
+               .unstack().reindex(index=regions, columns=themes))
     values = grid.to_numpy(dtype=float)
     text = [["-" if np.isnan(v) else f"{v:.1f}%" for v in row] for row in values]
     fig = go.Figure(go.Heatmap(
-        z=values, x=themes, y=provinces, text=text, texttemplate="%{text}", zmin=0,
+        z=values, x=themes, y=regions, text=text, texttemplate="%{text}", zmin=0,
         colorscale=[[0, "#EAF2FB"], [0.5, "#4FA3E0"], [1, NAVY]], hoverongaps=False,
         colorbar=dict(title="Share (%)"),
         hovertemplate="%{y}<br>%{x}<br>Average share: %{z:.1f}%<extra></extra>"))
@@ -491,7 +478,7 @@ def page_header(title: str, ctx: dict) -> None:
 def render_topbar_and_banner() -> None:
     st.markdown(
         '<div class="topbar"><div><div class="topbar-title">Community Mental-Wellbeing Signal Tracker</div>'
-        '<div class="topbar-sub">Regional Early-Warning and Stressor Monitoring System – Western Province, Sri Lanka</div></div>'
+        '<div class="topbar-sub">Regional Early-Warning and Stressor Monitoring System – Sri Lanka</div></div>'
         '<div class="demo-pill"><span class="dot"></span><b>Demonstration mode</b>'
         '<span>Supabase Database</span></div></div>'
         f'<div class="demo-banner">{svg("warning", 18)}<div><b>DEMONSTRATION MODE – ALL DATA IS SYNTHETIC.</b> '
@@ -511,7 +498,7 @@ def alert_cards(alerts: pd.DataFrame) -> None:
 
         out.append(
             f'<div class="alert-card {css}"><span class="badge {css}">SIMULATED {html.escape(status)}</span>'
-            f'<div class="alert-title">{html.escape(str(r.province))} · {html.escape(str(r.theme))}</div>'
+            f'<div class="alert-title">{html.escape(str(r.region))} · {html.escape(str(r.theme))}</div>'
             f'<div class="metric-row">'
             f'{metric("Previous baseline", f"{r.baseline_pct:.1f}%")}'
             f'{metric("Current", f"{r.current_pct:.1f}%")}'
@@ -538,17 +525,18 @@ def page_overview(ctx: dict) -> None:
         dominant = totals.index[0]
         note = f"{100 * totals.iloc[0] / totals.sum():.1f}% of responses"
     n_alerts = int((ctx["alerts"]["status"].astype(str).str.upper() == "ALERT").sum())
-    n_sel, n_all = len(ctx["provinces"]), len(ctx["all_provinces"])
+    n_sel, n_all = len(ctx["regions"]), len(ctx["all_regions"])
     coverage = 100 * n_sel / n_all if n_all else 0
+    region_title = ctx["geography"].title()
 
     alert_badge = (f'<span class="pill coral"><span class="dot"></span>{html.escape(week_label(ctx["end_week"]))} active</span>'
                    if n_alerts else '<span class="pill grey"><span class="dot"></span>None this week</span>')
     cards = [
         kpi_card_html("Total records", "message", f"{ctx['quality']['total_records']:,.0f}",
                       f'<div class="kpi-note">Source: Supabase ({ctx["quality"]["source"]})</div>'),
-        kpi_card_html("Districts included", "pin", f'{n_sel} <span class="of">/ {n_all}</span>',
+        kpi_card_html(f"{region_title}s included", "pin", f'{n_sel} <span class="of">/ {n_all}</span>',
                       f'<div class="progress"><div style="width:{coverage:.0f}%"></div></div>'
-                      f'<div class="kpi-note">Western Province Districts</div>'),
+                      f'<div class="kpi-note">Sri Lanka demonstration coverage</div>'),
         kpi_card_html("Dominant stressor", "dollar", html.escape(str(dominant)),
                       f'<div class="kpi-note">{html.escape(note)}</div>',
                       card_cls="primary", icon_cls="indigo", value_cls="text"),
@@ -559,8 +547,8 @@ def page_overview(ctx: dict) -> None:
     st.markdown(
         f'<div class="callout"><div class="callout-icon">{svg("info", 18)}</div><div>'
         '<div class="callout-title">What this tool shows</div>'
-        '<div class="callout-text">Monitors changes in community stressors across Western Province '
-        'districts (Colombo, Gampaha, Kalutara) using synthetic data stored in Supabase.</div>'
+        '<div class="callout-text">Shows synthetic demonstration patterns for all nine provinces '
+        'and 25 districts. The generated values do not describe actual Sri Lankan communities.</div>'
         f'<div class="disclaimer">{svg("shield", 14)}Reports stressor themes only. '
         'Does not provide clinical diagnoses or treatment advice.</div></div></div>',
         unsafe_allow_html=True)
@@ -569,7 +557,7 @@ def page_overview(ctx: dict) -> None:
 def page_stressors(ctx: dict) -> None:
     page_header("Stressor Analysis", ctx)
     st.markdown('<p class="section-note">Share of released responses by stressor theme '
-                'for the current district filters.</p>', unsafe_allow_html=True)
+                'for the current region filters.</p>', unsafe_allow_html=True)
     fig = build_donut(ctx["filtered"], ctx["themes"])
     if fig is None:
         st.info("No releasable data for this selection (all cells are below the minimum group size).")
@@ -586,21 +574,21 @@ def page_trends(ctx: dict) -> None:
     if visible_only(ctx["filtered"][ctx["filtered"]["theme"] == theme]).empty:
         st.info("No releasable data for this theme and selection.")
         return
-    show_chart(build_trend(ctx["filtered"], theme, ctx["provinces"], ctx["weeks"]))
-    st.caption("Lines show each district's weekly percentage share. Gaps mean the value was "
+    show_chart(build_trend(ctx["filtered"], theme, ctx["regions"], ctx["weeks"]))
+    st.caption(f"Lines show each selected {ctx['geography']}'s weekly percentage share. Gaps mean the value was "
                f"suppressed (fewer than {K} responses) or missing.")
 
 
 def page_regional(ctx: dict) -> None:
-    page_header("District Comparison (Western Province)", ctx)
+    page_header(f"{ctx['geography'].title()} Comparison", ctx)
     st.markdown('<p class="section-note">Average weekly percentage share of each theme by '
-                'district (Colombo, Gampaha, Kalutara), over the selected weeks.</p>',
+                'selected region, over the selected weeks.</p>',
                 unsafe_allow_html=True)
     if visible_only(ctx["filtered"]).empty:
         st.info("No releasable data for this selection.")
         return
-    show_chart(build_heatmap(ctx["filtered"], ctx["provinces"], ctx["themes"]))
-    st.caption('A "-" means no releasable data (suppressed or missing) for that district and theme.')
+    show_chart(build_heatmap(ctx["filtered"], ctx["regions"], ctx["themes"]))
+    st.caption('A "-" means no releasable data (suppressed or missing) for that region and theme.')
 
 
 def page_alerts(ctx: dict) -> None:
@@ -627,35 +615,39 @@ def page_privacy(ctx: dict) -> None:
         ("Supabase records", f"{q['total_records']:,}", "Total rows fetched"),
     ])
     st.markdown(
-        f"- **Rule:** every district-week-theme group with fewer than **{K}** responses has its "
+        f"- **Rule:** every {ctx['geography']}-week-theme group with fewer than **{K}** responses has its "
         "count and percentage hidden.\n"
-        "- **Scope:** Western Province (Colombo, Gampaha, Kalutara).\n"
-        "- **Synthetic data:** All records in Supabase are simulated.")
-    insufficient = s["provinces_with_insufficient_data"]
-    partial = s["provinces_with_some_suppression"]
-    st.markdown("**Districts with insufficient data (all groups suppressed):** "
+        "- **Scope:** all nine provinces and 25 districts of Sri Lanka.\n"
+        "- **Synthetic data:** All records in Supabase are simulated.\n"
+        "- **Limit:** small-cell suppression is a risk reduction measure, not a guarantee of anonymity.")
+    insufficient = s["regions_with_insufficient_data"]
+    partial = s["regions_with_some_suppression"]
+    st.markdown(f"**{ctx['geography'].title()}s with insufficient data (all groups suppressed):** "
                 + (", ".join(insufficient) if insufficient else "None"))
-    st.markdown("**Districts with some suppressed groups:** "
+    st.markdown(f"**{ctx['geography'].title()}s with some suppressed groups:** "
                 + (", ".join(partial) if partial else "None"))
 
-    by_prov = (ctx["safe"].groupby("province")["suppressed"].agg(["sum", "count"])
+    by_prov = (ctx["safe"].groupby("region")["suppressed"].agg(["sum", "count"])
                .rename(columns={"sum": "Suppressed groups", "count": "Total groups"}))
     by_prov["Visible groups"] = by_prov["Total groups"] - by_prov["Suppressed groups"]
     by_prov = by_prov[["Visible groups", "Suppressed groups", "Total groups"]]
-    st.dataframe(by_prov.reset_index().rename(columns={"province": "District"}), hide_index=True)
+    st.dataframe(
+        by_prov.reset_index().rename(columns={"region": ctx["geography"].title()}),
+        hide_index=True,
+    )
     st.caption(f"Data source: {q['source']}.")
 
 
 def page_methodology(ctx: dict) -> None:
     page_header("Methodology", ctx)
     st.markdown(f"""
-**Supabase Integration.** Data is stored in Supabase (`public.wellbeing_responses`) containing 5,000 synthetic records across 12 weeks for Western Province districts (Colombo, Gampaha, Kalutara).
+**Supabase Integration.** Synthetic demonstration records are stored in Supabase (`public.wellbeing_responses`) for all 9 provinces and 25 districts across 12 weeks. Province/district combinations are validated against the Sri Lankan geographic mapping.
 
 **Theme classification & Aggregation.** Responses are categorized into 5 themes: Job and Money, Exams and Studies, Loneliness and Isolation, Family and Relationships, and Other.
 
-**Privacy suppression.** Groups with fewer than {K} responses are suppressed using `privacy.py`.
+**Privacy suppression.** District- and province-level groups with fewer than {K} responses are suppressed using `privacy.py`. Complementary suppression reduces simple subtraction risks; k-based suppression alone does not guarantee complete anonymity.
 
-**Limitations.** Synthetic data and small-number suppression mean this is a demonstration of method, not a source of real-world community findings.
+**Limitations.** All generated values are synthetic, are not estimates of actual community conditions, and are not clinical findings. Small-number suppression means this is a demonstration of method, not a source of real-world community findings.
 """)
 
 
@@ -669,7 +661,7 @@ def go_to(page: str) -> None:
 
 def reset_filters(provinces: list, themes: list, weeks: list) -> None:
     """Button callback: clear filter keys from session state cleanly."""
-    st.session_state.pop("f_prov", None)
+    st.session_state.pop("f_region", None)
     st.session_state.pop("f_theme", None)
     st.session_state.pop("f_week", None)
 
@@ -689,8 +681,8 @@ def chip_filter(title: str, options: list, key: str, all_label: bool = False) ->
 
 
 def main() -> None:
-    st.set_page_config(page_title="Community Wellbeing Signal Tracker - Western Province",
-                       page_icon="🧠",
+    st.set_page_config(page_title="Community Wellbeing Signal Tracker - Sri Lanka",
+                       page_icon=None,
                        layout="wide", initial_sidebar_state="expanded")
     st.markdown(CSS, unsafe_allow_html=True)
     render_topbar_and_banner()
@@ -702,8 +694,29 @@ def main() -> None:
             st.cache_data.clear()
             st.rerun()
 
+    if hasattr(st.sidebar, "segmented_control"):
+        geography_label = st.sidebar.segmented_control(
+            "Geographic level",
+            ("Province", "District"),
+            default="Province",
+            key="f_geography",
+        )
+    else:
+        geography_label = st.sidebar.radio(
+            "Geographic level",
+            ("Province", "District"),
+            horizontal=True,
+            key="f_geography",
+        )
+    if geography_label not in {"Province", "District"}:
+        raise ValueError("Select either Province or District.")
+    geography_level = geography_label.lower()
+    if st.session_state.get("_previous_geography") != geography_level:
+        st.session_state.pop("f_region", None)
+        st.session_state["_previous_geography"] = geography_level
+
     try:
-        safe, summary, quality = load_supabase_data()
+        safe, summary, quality = load_supabase_data(geography_level)
     except Exception as exc:
         st.error(f"Failed to load data from Supabase: {exc}")
         st.error("Please verify your `.env` configuration (SUPABASE_URL and keys) and ensure Supabase is reachable.")
@@ -713,7 +726,7 @@ def main() -> None:
         st.error("The Supabase dataset returned 0 records.")
         st.stop()
 
-    all_provinces = DISTRICTS  # Colombo, Gampaha, Kalutara
+    all_regions = PROVINCES if geography_level == "province" else DISTRICTS
     all_themes = THEMES
     week_order = sorted(safe["week"].unique().tolist(), key=_natural_key)
 
@@ -729,9 +742,9 @@ def main() -> None:
     head_left, head_right = st.sidebar.columns([1, 1])
     head_left.markdown('<div class="filter-head">Filters</div>', unsafe_allow_html=True)
     head_right.button("Reset", key="reset_filters", on_click=reset_filters,
-                      args=(all_provinces, all_themes, week_order))
+                      args=(all_regions, all_themes, week_order))
 
-    provinces = chip_filter("District", all_provinces, "f_prov")
+    regions = chip_filter(geography_label, all_regions, "f_region")
     themes = chip_filter("Theme", all_themes, "f_theme", all_label=True)
 
     if len(week_order) > 1:
@@ -747,12 +760,12 @@ def main() -> None:
     if page == "Methodology":
         page_methodology({})
         return
-    if not provinces or not themes:
-        st.warning("Please select at least one district and one theme in the sidebar.")
+    if not regions or not themes:
+        st.warning(f"Please select at least one {geography_level} and one theme in the sidebar.")
         return
 
     weeks = week_order[week_order.index(start): week_order.index(end) + 1]
-    by_selection = safe[safe["province"].isin(provinces) & safe["theme"].isin(themes)]
+    by_selection = safe[safe["region"].isin(regions) & safe["theme"].isin(themes)]
     filtered = by_selection[by_selection["week"].isin(weeks)]
     if filtered.empty:
         st.info("No data matches the current filters.")
@@ -760,14 +773,18 @@ def main() -> None:
 
     alerts, alert_source = compute_alerts(by_selection, end, week_order)
     ctx = {"safe": safe, "filtered": filtered, "summary": summary, "quality": quality,
-           "provinces": provinces, "themes": themes, "weeks": weeks, "end_week": end,
-           "all_provinces": all_provinces, "alerts": alerts, "alert_source": alert_source}
+           "regions": regions, "all_regions": all_regions, "geography": geography_level,
+           "themes": themes, "weeks": weeks, "end_week": end,
+           "alerts": alerts, "alert_source": alert_source}
 
     {"Overview": page_overview, "Stressor Analysis": page_stressors,
      "Weekly Trends": page_trends, "Regional Comparison": page_regional,
      "Early Warning": page_alerts, "Privacy & Data Quality": page_privacy}[page](ctx)
 
-    st.caption("DEMONSTRATION MODE — SUPABASE SYNTHETIC DATA. Province: Western | Districts: Colombo, Gampaha, Kalutara.")
+    st.caption(
+        "DEMONSTRATION MODE — ALL RECORDS ARE SYNTHETIC. Values do not represent "
+        "actual wellbeing conditions in Sri Lanka."
+    )
 
 
 if __name__ == "__main__":
