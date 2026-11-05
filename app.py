@@ -96,6 +96,7 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 [data-testid="stAppDeployButton"] {{ display: none; }}
 .block-container {{ padding: 0 2rem 3rem 2rem; max-width: 100%; }}
 
+/* ---------- Top bar and banner ---------- */
 .topbar {{ background: #fff; border-bottom: 1px solid #E2E8F0; margin: 0 -2rem 1.5rem -2rem;
   padding: 1.1rem 4.5rem 1.1rem 2rem; display: flex; align-items: center;
   justify-content: space-between; gap: 1rem; flex-wrap: wrap; }}
@@ -114,11 +115,30 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .page-meta {{ color: #64748B; font-size: .82rem; }}
 .section-note {{ color: #64748B; font-size: .88rem; }}
 
+/* ---------- KPI cards ---------- */
 .kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.1rem; margin: 0 0 1.4rem 0; }}
-.kpi-card {{ background: #fff; border: 1px solid #E2E8F0; border-radius: 12px; padding: 1.1rem 1.25rem;
-  box-shadow: 0 1px 2px rgba(15,23,42,.04); display: flex; flex-direction: column;
-  justify-content: space-between; min-height: 140px; }}
+.kpi-card {{ 
+    background: #fff; 
+    border: 1px solid #E2E8F0; 
+    border-radius: 12px; 
+    padding: 1.1rem 1.25rem;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04); 
+    display: flex; 
+    flex-direction: column;
+    justify-content: space-between; 
+    min-height: 140px;
+    /* Smooth transition effect only on hover */
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}}
+.kpi-card:hover {{
+    transform: translateY(-4px);
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+    border-color: #CBD5E1;
+}}
 .kpi-card.primary {{ border-top: 3px solid {INDIGO}; box-shadow: 0 4px 14px rgba(99,102,241,.14); }}
+.kpi-card.primary:hover {{
+    box-shadow: 0 10px 22px rgba(99,102,241,0.2);
+}}
 .kpi-top {{ display: flex; justify-content: space-between; align-items: center; gap: .5rem; }}
 .kpi-label {{ color: #334155; font-size: .88rem; font-weight: 500; }}
 .kpi-icon {{ width: 32px; height: 32px; border-radius: 8px; background: #F1F5F9; color: #64748B;
@@ -137,8 +157,22 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .pill.grey {{ background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; }}
 .pill .dot {{ width: 6px; height: 6px; border-radius: 50%; background: currentColor; }}
 
-.callout {{ display: flex; gap: 1rem; background: #fff; border: 1px solid #E2E8F0; border-left: 4px solid {INDIGO};
-  border-radius: 12px; padding: 1.2rem 1.4rem; box-shadow: 0 1px 2px rgba(15,23,42,.04); }}
+/* ---------- Information callout ---------- */
+.callout {{ 
+    display: flex; 
+    gap: 1rem; 
+    background: #fff; 
+    border: 1px solid #E2E8F0; 
+    border-left: 4px solid {INDIGO};
+    border-radius: 12px; 
+    padding: 1.2rem 1.4rem; 
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}}
+.callout:hover {{
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(15, 23, 42, 0.06);
+}}
 .callout-icon {{ width: 32px; height: 32px; border-radius: 8px; background: #EEF2FF; color: {INDIGO};
   display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
 .callout-title {{ font-weight: 600; color: {NAVY}; margin-bottom: .5rem; }}
@@ -146,9 +180,20 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .disclaimer {{ display: inline-flex; align-items: center; gap: .5rem; background: #F1F5F9; border-radius: 8px;
   padding: .4rem .8rem; color: #64748B; font-style: italic; font-size: .82rem; margin-top: .8rem; }}
 
+/* ---------- Alert cards ---------- */
 .alert-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 1.1rem; margin-top: .5rem; }}
-.alert-card {{ background: #fff; border-radius: 12px; padding: 1rem 1.2rem; border: 1px solid #E2E8F0;
-  box-shadow: 0 1px 2px rgba(15,23,42,.04); }}
+.alert-card {{ 
+    background: #fff; 
+    border-radius: 12px; 
+    padding: 1rem 1.2rem; 
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}}
+.alert-card:hover {{
+    transform: translateY(-3px);
+    box-shadow: 0 8px 16px rgba(15, 23, 42, 0.06);
+}}
 .alert-card.alert {{ border-left: 5px solid #E11D48; }}
 .alert-card.watch {{ border-left: 5px solid #F59E0B; }}
 .badge {{ display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .05em;
@@ -161,6 +206,7 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .metric-value {{ color: {NAVY}; font-weight: 600; font-size: .98rem; }}
 .sim-tag {{ color: #64748B; font-size: .72rem; margin-top: .7rem; font-style: italic; }}
 
+/* ---------- Dark sidebar ---------- */
 section[data-testid="stSidebar"], section[data-testid="stSidebar"] > div {{ background: {NAVY}; }}
 section[data-testid="stSidebar"][aria-expanded="true"] {{ min-width: 264px; max-width: 264px; width: 264px; }}
 section[data-testid="stSidebar"] {{ border-right: 1px solid #1E293B; }}
@@ -182,11 +228,12 @@ section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-pr
   background: #1E293B; color: #fff; border-left: 3px solid {INDIGO}; }}
 .sidebar-spacer {{ height: 2.5rem; }}
 .filter-head {{ color: #94A3B8; font-size: .75rem; font-weight: 500; padding-top: .35rem; }}
-.st-key-reset_filters button {{ width: auto !important; margin-left: auto; color: #94A3B8 !important;
+.st-key-reset_filters button {{ width: auto !important; margin-left: auto; margin-right: -0.4rem !important; color: #94A3B8 !important;
   font-size: .75rem !important; padding: .2rem 0 !important; border-left: none !important; background: transparent !important; }}
 .filter-label {{ display: flex; justify-content: space-between; color: #E2E8F0; font-size: .82rem;
   font-weight: 500; margin: .9rem 0 .4rem 0; }}
 .filter-label span {{ color: #64748B; font-size: .75rem; }}
+/* chip toggles (st.pills) */
 section[data-testid="stSidebar"] [data-testid="stBaseButton-pills"],
 section[data-testid="stSidebar"] button[kind="pills"] {{ background: transparent; border: 1px solid #334155;
   color: #CBD5E1; border-radius: 999px; font-size: .72rem; padding: .05rem .65rem; min-height: 1.75rem; }}
