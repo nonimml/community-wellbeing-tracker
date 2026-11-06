@@ -229,8 +229,12 @@ section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-pr
   background: #1E293B; color: #fff; border-left: 3px solid {INDIGO}; }}
 .sidebar-spacer {{ height: 2.5rem; }}
 .filter-head {{ color: #94A3B8; font-size: .75rem; font-weight: 500; padding-top: .35rem; }}
-.st-key-reset_filters button {{ width: auto !important; margin-left: auto; margin-right: -0.4rem !important; color: #94A3B8 !important;
-  font-size: .75rem !important; padding: .2rem 0 !important; border-left: none !important; background: transparent !important; }}
+.st-key-reset_filters,
+.st-key-reset_filters .stButton {{ display: flex; justify-content: center; width: 100%; }}
+.st-key-reset_filters button {{ width: auto !important; margin: 0 !important; color: #E2E8F0 !important;
+  font-size: .75rem !important; padding: .2rem .6rem !important; border-left: none !important;
+  background: transparent !important; min-height: 0 !important; }}
+.st-key-reset_filters button > div {{ justify-content: center !important; }}
 .filter-label {{ display: flex; justify-content: space-between; color: #E2E8F0; font-size: .82rem;
   font-weight: 500; margin: .9rem 0 .4rem 0; }}
 .filter-label span {{ color: #64748B; font-size: .75rem; }}
@@ -743,11 +747,8 @@ def main() -> None:
         nav_button = st.sidebar.button(name, key=f"nav_{name}", on_click=go_to, args=(name,),
                                        type="primary" if name == page else "secondary")
 
-    st.sidebar.markdown('<div class="sidebar-spacer"></div>', unsafe_allow_html=True)
-    head_left, head_right = st.sidebar.columns([1, 1])
-    head_left.markdown('<div class="filter-head">Filters</div>', unsafe_allow_html=True)
-    head_right.button("Reset", key="reset_filters", on_click=reset_filters,
-                      args=(all_regions, all_themes, week_order))
+    st.sidebar.button("Reset", key="reset_filters", on_click=reset_filters,
+                  args=(all_regions, all_themes, week_order))
 
     regions = chip_filter(geography_label, all_regions, "f_region")
     themes = chip_filter("Theme", all_themes, "f_theme", all_label=True)
