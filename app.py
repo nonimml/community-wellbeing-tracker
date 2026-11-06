@@ -676,6 +676,12 @@ def chip_filter(title: str, options: list, key: str, all_label: bool = False) ->
         chosen = st.sidebar.multiselect(title, options, key=key, label_visibility="collapsed")
     return [o for o in options if o in chosen]
 
+def _swap_geography_if_cleared() -> None:
+    """Clicking the already-selected option deselects it (None); swap to the other one instead."""
+    if st.session_state.get("f_geography") is None:
+        previous = st.session_state.get("_previous_geography", "province")
+        st.session_state["f_geography"] = "District" if previous == "province" else "Province"
+
 
 def main() -> None:
     st.set_page_config(page_title="Community Wellbeing Signal Tracker - Sri Lanka",
@@ -691,12 +697,14 @@ def main() -> None:
             st.cache_data.clear()
             st.rerun()
 
+    st.session_state.setdefault("f_geography", "Province")
+
     if hasattr(st.sidebar, "segmented_control"):
         geography_label = st.sidebar.segmented_control(
             "Geographic level",
             ("Province", "District"),
-            default="Province",
             key="f_geography",
+            on_change=_swap_geography_if_cleared,
         )
     else:
         geography_label = st.sidebar.radio(
