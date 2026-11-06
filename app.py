@@ -531,8 +531,7 @@ def page_overview(ctx: dict) -> None:
     alert_badge = (f'<span class="pill coral"><span class="dot"></span>{html.escape(week_label(ctx["end_week"]))} active</span>'
                    if n_alerts else '<span class="pill grey"><span class="dot"></span>None this week</span>')
     cards = [
-        kpi_card_html("Total records", "message", f"{ctx['quality']['total_records']:,.0f}",
-                      f'<div class="kpi-note">Source: Supabase ({ctx["quality"]["source"]})</div>'),
+        kpi_card_html("Total records", "message", f"{ctx['quality']['total_records']:,.0f}"),
         kpi_card_html(f"{region_title}s included", "pin", f'{n_sel} <span class="of">/ {n_all}</span>',
                       f'<div class="progress"><div style="width:{coverage:.0f}%"></div></div>'
                       f'<div class="kpi-note">Sri Lanka demonstration coverage</div>'),
