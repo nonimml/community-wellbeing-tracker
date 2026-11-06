@@ -478,11 +478,8 @@ def page_header(title: str, ctx: dict) -> None:
 def render_topbar_and_banner() -> None:
     st.markdown(
         '<div class="topbar"><div><div class="topbar-title">Community Mental-Wellbeing Signal Tracker</div>'
-        '<div class="topbar-sub">Regional Early-Warning and Stressor Monitoring System – Sri Lanka</div></div>'
-        '<div class="demo-pill"><span class="dot"></span><b>Demonstration mode</b>'
-        '<span>Supabase Database</span></div></div>'
-        f'<div class="demo-banner">{svg("warning", 18)}<div><b>DEMONSTRATION MODE – ALL DATA IS SYNTHETIC.</b> '
-        'Retrieved from Supabase (`public.wellbeing_responses`). Results are simulated.</div></div>',
+        '<div class="topbar-sub">Regional Early-Warning and Stressor Monitoring System – Sri Lanka</div></div></div>'
+        f'<div class="demo-banner">{svg("warning", 18)}<div><b>DEMONSTRATION MODE – ALL DATA IS SYNTHETIC.</b> ',
         unsafe_allow_html=True)
 
 
