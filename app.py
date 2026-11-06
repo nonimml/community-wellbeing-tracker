@@ -121,6 +121,7 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 .kpi-card {{ 
     background: #fff; 
     border: 1px solid #E2E8F0; 
+    border-top: 3px solid {INDIGO};
     border-radius: 12px; 
     padding: 1.1rem 1.25rem;
     box-shadow: 0 1px 2px rgba(15,23,42,.04); 
@@ -128,18 +129,15 @@ header[data-testid="stHeader"] {{ background: transparent; }}
     flex-direction: column;
     justify-content: space-between; 
     min-height: 140px;
-    /* Smooth transition effect only on hover */
     transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
 }}
 .kpi-card:hover {{
     transform: translateY(-4px);
     box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
     border-color: #CBD5E1;
+    border-top-color: {INDIGO};
 }}
-.kpi-card.primary {{ border-top: 3px solid {INDIGO}; box-shadow: 0 4px 14px rgba(99,102,241,.14); }}
-.kpi-card.primary:hover {{
-    box-shadow: 0 10px 22px rgba(99,102,241,0.2);
-}}
+.kpi-card.primary {{ box-shadow: 0 4px 14px rgba(99,102,241,.14); }}
 .kpi-top {{ display: flex; justify-content: space-between; align-items: center; gap: .5rem; }}
 .kpi-label {{ color: #334155; font-size: .88rem; font-weight: 500; }}
 .kpi-icon {{ width: 32px; height: 32px; border-radius: 8px; background: #F1F5F9; color: #64748B;
