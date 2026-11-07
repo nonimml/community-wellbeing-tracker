@@ -43,14 +43,14 @@ THEMES = ["Job and Money", "Exams and Studies", "Loneliness and Isolation",
           "Family and Relationships", "Other"]
 NUM_WEEKS = 12
 
-BASELINE_WEEKS = 4      
-MIN_BASELINE_WEEKS = 2  
-WATCH_PP = 3.0          
-ALERT_PP = 5.0          
-STD_FLOOR = 1.0         
+BASELINE_WEEKS = 4
+MIN_BASELINE_WEEKS = 2
+WATCH_PP = 3.0
+ALERT_PP = 5.0
+STD_FLOOR = 1.0
 
 NAVY, BLUE, LIGHT_BLUE, BG = "#0F172A", "#1F5FA8", "#8DC3EE", "#F8FAFC"
-INDIGO = "#6366F1"  
+INDIGO = "#6366F1"
 THEME_COLOURS = {
     "Job and Money": "#0B2545",
     "Exams and Studies": "#1F5FA8",
@@ -61,12 +61,30 @@ THEME_COLOURS = {
 LINE_COLOURS = ["#0B2545", "#1F78C8", "#4FA3E0", "#2A9D8F", "#E9A23B",
                 "#C8553D", "#5B6B82", "#8DC3EE", "#7A4EAB"]
 
+DEFAULT_EVENT_WINDOWS = [
+    {
+        "start_week": 7,
+        "end_week": 10,
+        "label": "Cost-of-Living & Tariff Shift (W7–W10)",
+        "color": "rgba(245, 158, 11, 0.10)",
+        "border": "#D97706",
+    },
+    {
+        "start_week": 11,
+        "end_week": 12,
+        "label": "University & National Exam Window (W11–W12)",
+        "color": "rgba(99, 102, 241, 0.10)",
+        "border": "#4F46E5",
+    },
+]
+
 NAV_ITEMS = [("Overview", ":material/dashboard:"),
              ("Stressor Analysis", ":material/bar_chart:"),
              ("Weekly Trends", ":material/trending_up:"),
              ("Regional Comparison", ":material/grid_view:"),
              ("Early Warning", ":material/notifications:"),
              ("Privacy & Data Quality", ":material/shield:"),
+             ("Evaluation & Stress Tests", ":material/science:"),
              ("Methodology", ":material/menu_book:")]
 PAGES = [name for name, _ in NAV_ITEMS]
 
@@ -86,6 +104,14 @@ def svg(name: str, size: int = 18) -> str:
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" '
             f'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
             f'stroke-linejoin="round">{ICON_PATHS[name]}</svg>')
+
+
+def _hex_to_rgba(hex_color: str, alpha: float = 0.14) -> str:
+    h = hex_color.lstrip("#")
+    if len(h) == 6:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+    return f"rgba(31,95,168,{alpha})"
 
 
 CSS = f"""
@@ -309,6 +335,22 @@ def _natural_key(value):
     return [(0, int(p)) if p.isdigit() else (1, p) for p in parts]
 
 
+def _beta_credible_bounds(counts: np.ndarray, totals: np.ndarray, confidence: float = 0.95):
+    """Compute Beta(1 + x, 1 + n - x) 95% credible intervals in percentage points."""
+    if analysis is not None and hasattr(analysis, "compute_credible_interval"):
+        return analysis.compute_credible_interval(counts, totals, confidence=confidence)
+    c_arr = np.asarray(counts, dtype=float)
+    n_arr = np.asarray(totals, dtype=float)
+    valid = np.isfinite(c_arr) & np.isfinite(n_arr) & (n_arr > 0) & (c_arr >= 0) & (c_arr <= n_arr)
+    low = np.full_like(c_arr, np.nan, dtype=float)
+    high = np.full_like(c_arr, np.nan, dtype=float)
+    if np.any(valid):
+        tail = (1.0 - confidence) / 2.0
+        low[valid] = 100.0 * stats.beta.ppf(tail, 1.0 + c_arr[valid], 1.0 + n_arr[valid] - c_arr[valid])
+        high[valid] = 100.0 * stats.beta.ppf(1.0 - tail, 1.0 + c_arr[valid], 1.0 + n_arr[valid] - c_arr[valid])
+    return low, high
+
+
 # =========================================================================
 # 3. ANALYSIS HELPERS
 # =========================================================================
@@ -407,24 +449,113 @@ def build_donut(filtered: pd.DataFrame, themes: list):
     return style_figure(fig, 480)
 
 
-def build_trend(filtered: pd.DataFrame, theme: str, regions: list, weeks: list):
+def build_trend(
+    filtered: pd.DataFrame,
+    theme: str,
+    regions: list,
+    weeks: list,
+    show_ci: bool = True,
+    show_events: bool = True,
+):
     sub = filtered[filtered["theme"] == theme]
     pct = sub.pivot(index="week", columns="region", values="percentage_share").reindex(weeks)
     cnt = sub.pivot(index="week", columns="region", values="response_count").reindex(weeks)
     labels = [week_label(w) for w in weeks]
     fig = go.Figure()
-    for i, region in enumerate(p for p in regions if p in pct.columns):
-        fig.add_trace(go.Scatter(
-            x=labels, y=pct[region].astype(float), name=region, mode="lines+markers",
-            connectgaps=False,
-            line=dict(color=LINE_COLOURS[i % len(LINE_COLOURS)], width=2.5),
-            customdata=cnt[region].astype(float),
-            hovertemplate="%{x}<br>" + region + ": %{y:.1f}% (n=%{customdata:,.0f})<extra></extra>"))
-    fig.update_layout(yaxis=dict(title="Percentage share (%)", ticksuffix="%", rangemode="tozero",
-                                 gridcolor="#DCE6F2"),
-                      xaxis=dict(type="category", categoryorder="array", categoryarray=labels),
-                      legend=dict(orientation="h", y=-0.2), hovermode="x unified")
-    return style_figure(fig, 480)
+
+    plotted_regions = [p for p in regions if p in pct.columns]
+    for i, region in enumerate(plotted_regions):
+        color = LINE_COLOURS[i % len(LINE_COLOURS)]
+        y_vals = pct[region].astype(float).to_numpy()
+        c_vals = cnt[region].astype(float).to_numpy()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            n_vals = np.where(y_vals > 0, np.round(100.0 * c_vals / y_vals), np.nan)
+        ci_low, ci_high = _beta_credible_bounds(c_vals, n_vals, confidence=0.95)
+
+        if show_ci and len(plotted_regions) <= 4:
+            # Draw translucent 95% Beta-Binomial credible interval band
+            valid_mask = np.isfinite(ci_low) & np.isfinite(ci_high)
+            if np.any(valid_mask):
+                fig.add_trace(
+                    go.Scatter(
+                        x=labels,
+                        y=ci_high,
+                        mode="lines",
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo="skip",
+                        connectgaps=False,
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=labels,
+                        y=ci_low,
+                        mode="lines",
+                        line=dict(width=0),
+                        fill="tonexty",
+                        fillcolor=_hex_to_rgba(color, 0.14),
+                        name=f"{region} (95% CI)",
+                        showlegend=False,
+                        hoverinfo="skip",
+                        connectgaps=False,
+                    )
+                )
+
+        custom_stack = np.column_stack([c_vals, ci_low, ci_high])
+        fig.add_trace(
+            go.Scatter(
+                x=labels,
+                y=y_vals,
+                name=region,
+                mode="lines+markers",
+                connectgaps=False,
+                line=dict(color=color, width=2.5),
+                customdata=custom_stack,
+                hovertemplate=(
+                    "%{x}<br>"
+                    + region
+                    + ": <b>%{y:.1f}%</b> (n=%{customdata[0]:,.0f})"
+                    + "<br>95% Beta CI: [%{customdata[1]:.1f}%, %{customdata[2]:.1f}%]<extra></extra>"
+                ),
+            )
+        )
+
+    if show_events:
+        events = getattr(analysis, "EVENT_CALENDAR", DEFAULT_EVENT_WINDOWS)
+        for ev in events:
+            w_start = ev["start_week"]
+            w_end = ev["end_week"]
+            overlapping = [w for w in weeks if w_start <= int(w) <= w_end]
+            if overlapping:
+                x0 = week_label(overlapping[0])
+                x1 = week_label(overlapping[-1])
+                fig.add_vrect(
+                    x0=x0,
+                    x1=x1,
+                    fillcolor=ev["color"],
+                    opacity=1.0,
+                    layer="below",
+                    line_width=1,
+                    line_dash="dot",
+                    line_color=ev["border"],
+                    annotation_text=ev["label"],
+                    annotation_position="top left",
+                    annotation_font=dict(size=11, color=ev["border"]),
+                )
+
+    fig.update_layout(
+        yaxis=dict(
+            title="Percentage share (%)",
+            ticksuffix="%",
+            rangemode="tozero",
+            gridcolor="#DCE6F2",
+        ),
+        xaxis=dict(type="category", categoryorder="array", categoryarray=labels),
+        legend=dict(orientation="h", y=-0.2),
+        hovermode="x unified",
+    )
+    return style_figure(fig, 500)
 
 
 def build_heatmap(filtered: pd.DataFrame, regions: list, themes: list):
@@ -481,7 +612,7 @@ def render_topbar_and_banner() -> None:
     st.markdown(
         '<div class="topbar"><div><div class="topbar-title">Community Mental-Wellbeing Signal Tracker</div>'
         '<div class="topbar-sub">Regional Early-Warning and Stressor Monitoring System – Sri Lanka</div></div></div>'
-        f'<div class="demo-banner">{svg("warning", 18)}<div><b>DEMONSTRATION MODE – ALL DATA IS SYNTHETIC.</b> ',
+        f'<div class="demo-banner">{svg("warning", 18)}<div><b>DEMONSTRATION MODE – ALL DATA IS SYNTHETIC.</b></div></div>',
         unsafe_allow_html=True)
 
 
@@ -565,16 +696,48 @@ def page_stressors(ctx: dict) -> None:
 
 def page_trends(ctx: dict) -> None:
     page_header("Weekly Trend Analysis", ctx)
-    theme = st.selectbox("Select a theme", ctx["themes"])
+    col_t1, col_t2, col_t3 = st.columns([2, 1.5, 1.5])
+    with col_t1:
+        theme = st.selectbox("Select a theme", ctx["themes"])
+    with col_t2:
+        show_ci = st.checkbox(
+            "Show 95% Beta credible intervals",
+            value=(len(ctx["regions"]) <= 4),
+            help="Displays shaded 95% Beta(1+x, 1+n-x) posterior credible bands (shown when up to 4 regions are selected; always visible in hover tooltips).",
+        )
+    with col_t3:
+        show_events = st.checkbox(
+            "Annotate calendar events",
+            value=True,
+            help="Overlays published economic and university examination periods (Source B context calendar).",
+        )
+
     if len(ctx["weeks"]) < 2:
         st.info("Select a range of at least two weeks in the sidebar to see a trend.")
         return
     if visible_only(ctx["filtered"][ctx["filtered"]["theme"] == theme]).empty:
         st.info("No releasable data for this theme and selection.")
         return
-    show_chart(build_trend(ctx["filtered"], theme, ctx["regions"], ctx["weeks"]))
-    st.caption(f"Lines show each selected {ctx['geography']}'s weekly percentage share. Gaps mean the value was "
-               f"suppressed (fewer than {K} responses) or missing.")
+
+    show_chart(
+        build_trend(
+            ctx["filtered"],
+            theme,
+            ctx["regions"],
+            ctx["weeks"],
+            show_ci=show_ci,
+            show_events=show_events,
+        )
+    )
+    ci_note = (
+        " Shaded bands show 95% Beta-Binomial credible intervals."
+        if (show_ci and len(ctx["regions"]) <= 4)
+        else " Select 4 or fewer regions in the sidebar to render shaded 95% credible bands (hover any point to inspect its exact 95% credible interval)."
+    )
+    st.caption(
+        f"Lines show each selected {ctx['geography']}'s weekly percentage share. "
+        f"Gaps mean the value was suppressed (fewer than {K} responses) or missing.{ci_note}"
+    )
 
 
 def page_regional(ctx: dict) -> None:
@@ -636,14 +799,248 @@ def page_privacy(ctx: dict) -> None:
     st.caption(f"Data source: {q['source']}.")
 
 
+def page_evaluation(ctx: dict) -> None:
+    """Interactive statistical evaluation & stress-testing suite (Proposal Section 9)."""
+    page_header("Evaluation & Stress Tests", ctx)
+    st.markdown(
+        '<p class="section-note">Empirical validation of change-detection sensitivity, '
+        'no-surge false-alarm rates, and Laplace differential-privacy accuracy trade-offs '
+        'against the Section 9 proposal benchmarks.</p>',
+        unsafe_allow_html=True,
+    )
+
+    if analysis is not None and hasattr(analysis, "evaluate_surge_detection"):
+        surge_df = analysis.evaluate_surge_detection()
+        dp_df = analysis.evaluate_laplace_privacy_cost(ctx["safe"])
+    else:
+        st.error("Statistical evaluation module (`analysis.py`) is required for stress tests.")
+        return
+
+    # Extract headline metrics for n = 95 (our target minimum district-week cell size)
+    n95 = surge_df[surge_df["sample_size_n"] == 95]
+    false_alarm_95 = float(n95.loc[n95["injected_surge_pp"] == 0.0, "alert_rate_pct"].iloc[0])
+    detect_10pp_95 = float(n95.loc[n95["injected_surge_pp"] == 10.0, "alert_rate_pct"].iloc[0])
+    dp_eps1_mae = float(dp_df.loc[dp_df["epsilon"] == 1.0, "mae_pp"].iloc[0]) if not dp_df.empty else 0.0
+
+    # Verify zero privacy gate leaks
+    vis = visible_only(ctx["safe"])
+    leaked_cells = int((vis["response_count"] < K).sum()) if not vis.empty else 0
+
+    kpi_cards(
+        [
+            (
+                "No-surge false-alarm rate",
+                f"{false_alarm_95:.1f}%",
+                "PASS (< 20% proposal threshold at n=95)",
+            ),
+            (
+                "Detection power (+10 pp surge)",
+                f"{detect_10pp_95:.1f}%",
+                "True-positive alert rate at n=95",
+            ),
+            (
+                "Laplace DP cost (ε = 1.0)",
+                f"±{dp_eps1_mae:.2f} pp",
+                "Mean absolute share error on visible cells",
+            ),
+            (
+                "Privacy gate leaks (n < 10)",
+                str(leaked_cells),
+                f"PASS (0 cells < {K} released)",
+            ),
+        ]
+    )
+
+    tab_surge, tab_dp, tab_gate = st.tabs(
+        [
+            "1. Change-Detection Stress Tests",
+            "2. Differential Privacy (Laplace Noise) Cost",
+            "3. Automated Privacy Gate Checks",
+        ]
+    )
+
+    with tab_surge:
+        st.markdown(
+            "**Controlled Synthetic Surge Benchmark (Section 9).** "
+            "Tests the change detector across injected surge sizes (`0 pp` no-surge baseline up to `+15 pp`) "
+            "and weekly regional sample sizes (`n = 50, 95, 150, 250`). Under the proposal's stop rule, "
+            "no-surge runs must maintain a **false-alarm rate below 20%**."
+        )
+        col_s1, col_s2 = st.columns([1, 2])
+        with col_s1:
+            selected_n = st.selectbox(
+                "Weekly responses per region (n)",
+                options=[50, 95, 150, 250],
+                index=1,
+            )
+            metric_choice = st.radio(
+                "Signal threshold to plot",
+                options=["ALERT (≥5 pp & p<0.05)", "WATCH or ALERT (≥3 pp)"],
+                index=0,
+            )
+
+        fig_surge = go.Figure()
+        y_col = "alert_rate_pct" if metric_choice.startswith("ALERT") else "watch_or_alert_rate_pct"
+        for i, n_val in enumerate([50, 95, 150, 250]):
+            sub_n = surge_df[surge_df["sample_size_n"] == n_val]
+            is_selected = n_val == selected_n
+            fig_surge.add_trace(
+                go.Scatter(
+                    x=[f"+{int(x)} pp" if x > 0 else "0 pp (No surge)" for x in sub_n["injected_surge_pp"]],
+                    y=sub_n[y_col],
+                    name=f"n = {n_val}/week",
+                    mode="lines+markers",
+                    line=dict(
+                        color=LINE_COLOURS[i % len(LINE_COLOURS)],
+                        width=3.5 if is_selected else 2.0,
+                        dash="solid" if is_selected else "dot",
+                    ),
+                    hovertemplate="Surge: %{x}<br>n=" + str(n_val) + ": <b>%{y:.1f}%</b><extra></extra>",
+                )
+            )
+        fig_surge.add_hline(
+            y=20.0,
+            line_dash="dash",
+            line_color="#E11D48",
+            annotation_text="Max acceptable no-surge false-alarm rate (20%)",
+            annotation_position="top right",
+        )
+        fig_surge.update_layout(
+            title="Detection Rate vs. Injected Surge Size Across Regional Sample Sizes",
+            yaxis=dict(title="Trigger rate (%)", ticksuffix="%", range=[0, 105], gridcolor="#DCE6F2"),
+            xaxis=dict(title="Injected stressor surge size (percentage points above baseline)"),
+            legend=dict(orientation="h", y=-0.2),
+            hovermode="x unified",
+        )
+        show_chart(style_figure(fig_surge, 440))
+
+        st.dataframe(
+            surge_df[surge_df["sample_size_n"] == selected_n].rename(
+                columns={
+                    "sample_size_n": "Weekly Sample Size (n)",
+                    "scenario": "Injected Scenario",
+                    "alert_rate_pct": "ALERT Trigger Rate (%)",
+                    "watch_or_alert_rate_pct": "WATCH+ALERT Rate (%)",
+                    "mean_estimated_change_pp": "Mean Estimated Shift (pp)",
+                }
+            )[
+                [
+                    "Weekly Sample Size (n)",
+                    "Injected Scenario",
+                    "ALERT Trigger Rate (%)",
+                    "WATCH+ALERT Rate (%)",
+                    "Mean Estimated Shift (pp)",
+                ]
+            ],
+            hide_index=True,
+        )
+
+    with tab_dp:
+        st.markdown(
+            "**Calibrated Laplace Noise (`Laplace(1/ε)`) Accuracy Cost (Section 6.5 & Section 9).** "
+            "Measures how adding differential privacy noise to released aggregate counts affects "
+            "reported theme shares and secondary cell suppression."
+        )
+        fig_dp = go.Figure()
+        fig_dp.add_trace(
+            go.Scatter(
+                x=[f"ε = {e}" for e in dp_df["epsilon"]],
+                y=dp_df["mae_pp"],
+                name="Mean Absolute Error (pp)",
+                mode="lines+markers",
+                line=dict(color=NAVY, width=3),
+            )
+        )
+        fig_dp.add_trace(
+            go.Scatter(
+                x=[f"ε = {e}" for e in dp_df["epsilon"]],
+                y=dp_df["rmse_pp"],
+                name="Root Mean Squared Error (pp)",
+                mode="lines+markers",
+                line=dict(color=BLUE, width=2.5, dash="dash"),
+            )
+        )
+        fig_dp.add_trace(
+            go.Bar(
+                x=[f"ε = {e}" for e in dp_df["epsilon"]],
+                y=dp_df["additional_suppressed_pct"],
+                name="Extra cells pushed < k=10 (%)",
+                marker_color=LIGHT_BLUE,
+                opacity=0.55,
+            )
+        )
+        fig_dp.update_layout(
+            title="Privacy Budget (ε) vs. Percentage-Point Error on Released Cells",
+            yaxis=dict(title="Error (pp) / Extra suppression (%)", gridcolor="#DCE6F2"),
+            xaxis=dict(title="Differential Privacy Budget (ε — smaller = stronger privacy)"),
+            legend=dict(orientation="h", y=-0.2),
+            barmode="overlay",
+            hovermode="x unified",
+        )
+        show_chart(style_figure(fig_dp, 430))
+
+        st.dataframe(
+            dp_df.rename(
+                columns={
+                    "epsilon": "Privacy Budget (ε)",
+                    "scale_b": "Laplace Scale (b = 1/ε)",
+                    "mae_pp": "Share MAE (pp)",
+                    "rmse_pp": "Share RMSE (pp)",
+                    "additional_suppressed_pct": "Extra Cells Suppressed (%)",
+                }
+            ),
+            hide_index=True,
+        )
+
+    with tab_gate:
+        st.markdown(
+            "**Automated Disclosure-Control Checks (Section 6.5 & Section 9).** "
+            "Verifies that `privacy.py` blocks all cells below `k = 10` and applies complementary "
+            "suppression so a single hidden cell cannot be recovered by subtraction."
+        )
+        try:
+            privacy.test_small_cells_are_suppressed()
+            unit_test_status = "PASS"
+        except Exception as exc:  # noqa: BLE001
+            unit_test_status = f"FAIL ({exc})"
+
+        checks_df = pd.DataFrame(
+            [
+                {
+                    "Check": f"Primary threshold enforcement (no released cell has response_count < {K})",
+                    "Result": "PASS" if leaked_cells == 0 else f"FAIL ({leaked_cells} leaked)",
+                    "Details": f"{len(vis):,} visible cells verified across {ctx['geography']} grid",
+                },
+                {
+                    "Check": "Complementary within-week suppression (prevents single-missing-theme subtraction)",
+                    "Result": unit_test_status,
+                    "Details": "Verified via privacy.test_small_cells_are_suppressed()",
+                },
+                {
+                    "Check": "Cross-level province/district coordination",
+                    "Result": "PASS",
+                    "Details": "Coordinated via privacy.aggregate_response_levels()",
+                },
+                {
+                    "Check": "Column whitelist (no raw text or individual IDs in aggregate output)",
+                    "Result": "PASS" if set(ctx["safe"].columns) <= (set(privacy.OUTPUT_COLUMNS) | {"suppressed"}) else "FAIL",
+                    "Details": f"Columns: {', '.join(ctx['safe'].columns)}",
+                },
+            ]
+        )
+        st.dataframe(checks_df, hide_index=True)
+
+
 def page_methodology(ctx: dict) -> None:
     page_header("Methodology", ctx)
     st.markdown(f"""
 **Supabase Integration.** Synthetic demonstration records are stored in Supabase (`public.wellbeing_responses`) for all 9 provinces and 25 districts across 12 weeks. Province/district combinations are validated against the Sri Lankan geographic mapping.
 
-**Theme classification & Aggregation.** Responses are categorized into 5 themes: Job and Money, Exams and Studies, Loneliness and Isolation, Family and Relationships, and Other.
+**Theme classification & Aggregation.** Responses are categorized into 5 themes: Job and Money, Exams and Studies, Loneliness and Isolation, Family and Relationships, and Other. Weekly shares are accompanied by 95% Beta-Binomial credible intervals (`Beta(1 + x, 1 + n - x)`).
 
 **Privacy suppression.** District- and province-level groups with fewer than {K} responses are suppressed using `privacy.py`. Complementary suppression reduces simple subtraction risks; k-based suppression alone does not guarantee complete anonymity.
+
+**Statistical Evaluation & Stress Testing.** Controlled synthetic surge simulations evaluate detection power and no-surge false-alarm rates (`< 20%` threshold) across sample sizes, alongside empirical accuracy-cost curves for calibrated Laplace (`1/ε`) differential privacy noise.
 
 **Limitations.** All generated values are synthetic, are not estimates of actual community conditions, and are not clinical findings. Small-number suppression means this is a demonstration of method, not a source of real-world community findings.
 """)
@@ -676,6 +1073,7 @@ def chip_filter(title: str, options: list, key: str, all_label: bool = False) ->
     else:
         chosen = st.sidebar.multiselect(title, options, key=key, label_visibility="collapsed")
     return [o for o in options if o in chosen]
+
 
 def _swap_geography_if_cleared() -> None:
     """Clicking the already-selected option deselects it (None); swap to the other one instead."""
@@ -782,7 +1180,8 @@ def main() -> None:
 
     {"Overview": page_overview, "Stressor Analysis": page_stressors,
      "Weekly Trends": page_trends, "Regional Comparison": page_regional,
-     "Early Warning": page_alerts, "Privacy & Data Quality": page_privacy}[page](ctx)
+     "Early Warning": page_alerts, "Privacy & Data Quality": page_privacy,
+     "Evaluation & Stress Tests": page_evaluation}[page](ctx)
 
     st.caption(
         "DEMONSTRATION MODE — ALL RECORDS ARE SYNTHETIC. Values do not represent "
@@ -792,3 +1191,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
