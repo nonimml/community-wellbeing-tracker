@@ -1,38 +1,13 @@
 """
 analysis.py
-Community Mental-Wellbeing Signal Tracker - analysis layer
+Community Mental-Wellbeing Signal Tracker - statistical & evaluation layer
 
 !! IMPORTANT !!
 This module works ONLY with SYNTHETIC data (see generate_data.py). Its output is
-a demonstration of how change-detection could work. Nothing it produces is a
-validated real-world mental-health alert, a finding about real communities, a
-diagnosis, or a risk score. It works with aggregate counts and percentages only:
-it never reads, stores or returns free-text responses, and it never scores
-individuals.
-
-Design notes (for Streamlit use)
-  * Every function takes a DataFrame (from load_data) and returns plain
-    DataFrames / dicts. No printing, no global state, no file access except
-    load_data(), so each function can be wrapped in @st.cache_data.
-  * Small cells (fewer than MIN_SAMPLE_SIZE responses) are suppressed: their
-    counts and percentages are replaced with NaN so they cannot be displayed.
-
-Statistical method (used by detect_changes)
-  For one province and theme we compare:
-      current week   : x1 theme responses out of n1 responses that week
-      baseline       : x2 theme responses out of n2 responses in the previous
-                       four weeks (pooled, so busier weeks count for more)
-  We run a ONE-SIDED two-proportion z-test of
-      H0: current share <= baseline share    vs    H1: current share > baseline share
-  and report
-      p_value        : probability of seeing an increase at least this large by
-                       random sampling variation alone, if H0 were true.
-      confidence_pct : (1 - p_value) * 100. A rough "strength of evidence"
-                       score. It is NOT the probability that the increase is
-                       real, and it ignores that many province/theme pairs are
-                       tested at once (some false signals are expected).
-  The z-test uses a normal approximation, which is why a minimum sample size
-  is required before any result is reported.
+a demonstration of how change-detection, Beta-Binomial credible intervals,
+synthetic surge stress-testing, and Laplace differential-privacy noise evaluation
+work. Nothing it produces is a validated real-world mental-health alert, a
+finding about real communities, a diagnosis, or a risk score.
 """
 
 from __future__ import annotations
@@ -42,6 +17,7 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
+from scipy.stats import beta as beta_dist
 from scipy.stats import norm
 
 # --------------------------------------------------------------------------
@@ -56,6 +32,24 @@ BASELINE_WEEKS = 4        # number of previous weeks that form the baseline
 MIN_SAMPLE_SIZE = 10      # minimum responses needed to report a share / alert
 MIN_CHANGE_PP = 10.0      # minimum increase (percentage points) for an alert
 ALPHA = 0.05              # one-sided p-value must be below this for an alert
+
+# Public event calendar annotations (Proposal Section 5.1 Source B)
+EVENT_CALENDAR = [
+    {
+        "start_week": 7,
+        "end_week": 10,
+        "label": "Cost-of-Living & Tariff Shift (W7–W10)",
+        "color": "rgba(245, 158, 11, 0.12)",
+        "border": "#D97706",
+    },
+    {
+        "start_week": 11,
+        "end_week": 12,
+        "label": "University & National Exam Window (W11–W12)",
+        "color": "rgba(99, 102, 241, 0.12)",
+        "border": "#4F46E5",
+    },
+]
 
 DISCLAIMER = (
     "All data shown is SYNTHETIC and for demonstration only. Alerts are "
@@ -92,19 +86,45 @@ def _pct(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
     return numerator.div(denominator.where(denominator > 0)) * 100
 
 
+def compute_credible_interval(
+    counts: Union[pd.Series, np.ndarray, float],
+    totals: Union[pd.Series, np.ndarray, float],
+    confidence: float = 0.95,
+    prior_alpha: float = 1.0,
+    prior_beta: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute Beta-Binomial posterior credible intervals (in percentage points 0-100).
+
+    Uses a Beta(prior_alpha, prior_beta) conjugate prior (default Beta(1, 1)
+    uniform prior) updated with `counts` successes out of `totals` trials:
+        posterior ~ Beta(prior_alpha + counts, prior_beta + totals - counts)
+    Returns (lower_pct, upper_pct) arrays, with NaN where counts or totals are NaN/<=0.
+    """
+    c_arr = np.asarray(counts, dtype=float)
+    n_arr = np.asarray(totals, dtype=float)
+    valid = np.isfinite(c_arr) & np.isfinite(n_arr) & (n_arr > 0) & (c_arr >= 0) & (c_arr <= n_arr)
+
+    lower = np.full_like(c_arr, np.nan, dtype=float)
+    upper = np.full_like(c_arr, np.nan, dtype=float)
+    if not np.any(valid):
+        return lower, upper
+
+    tail = (1.0 - confidence) / 2.0
+    a_post = prior_alpha + c_arr[valid]
+    b_post = prior_beta + (n_arr[valid] - c_arr[valid])
+    lower[valid] = 100.0 * beta_dist.ppf(tail, a_post, b_post)
+    upper[valid] = 100.0 * beta_dist.ppf(1.0 - tail, a_post, b_post)
+    return lower, upper
+
+
 def _distribution_raw(df: pd.DataFrame) -> pd.DataFrame:
     """
     Unsuppressed counts for EVERY province x week x theme combination.
-
-    Combinations with no responses get count 0 (rather than being absent), and
-    weeks with no data at all are kept so that "the previous four weeks" always
-    means four calendar weeks. share_pct is NaN when the province-week has no
-    responses. Internal use only: public functions apply small-cell suppression.
     """
     columns = ["province", "week", "theme", "count", "total", "share_pct"]
     _require_columns(df, ["province", "week", "theme"])
 
-    # Ignore rows missing any key field instead of failing.
     clean = df.dropna(subset=["province", "week", "theme"])
     if clean.empty:
         return pd.DataFrame(columns=columns)
@@ -135,16 +155,9 @@ def _resolve_latest_week(raw: pd.DataFrame, latest_week: Optional[int]) -> int:
 def _baseline_raw(raw: pd.DataFrame, latest_week: int, baseline_weeks: int) -> pd.DataFrame:
     """
     Pooled counts over the `baseline_weeks` weeks BEFORE latest_week.
-
-    For each province and theme:
-      baseline_count          = theme responses in the window
-      baseline_total          = all responses in the province in the window
-      baseline_weeks_with_data= weeks in the window with at least one response
     """
     window = raw[(raw["week"] >= latest_week - baseline_weeks) & (raw["week"] < latest_week)]
     window = window.assign(has_data=window["total"] > 0)
-    # For a fixed (province, theme) each week appears once, so summing "total"
-    # gives the province's total responses across the window.
     return (
         window.groupby(["province", "theme"])
         .agg(
@@ -162,15 +175,6 @@ def _baseline_raw(raw: pd.DataFrame, latest_week: int, baseline_weeks: int) -> p
 def load_data(source: PathOrBuffer = DATA_PATH) -> pd.DataFrame:
     """
     Load the synthetic CSV and validate it.
-
-    `source` may be a file path or a file-like object (e.g. the object returned
-    by Streamlit's st.file_uploader). Handling of problems:
-      * missing file / missing columns / non-synthetic rows -> clear error
-      * rows missing province, week, theme or response_id    -> dropped
-      * missing language                                      -> "Unknown"
-      * unparseable dates                                     -> NaT (row kept)
-      * duplicate response_id                                 -> first one kept
-    Only the seven expected columns are kept.
     """
     if isinstance(source, (str, os.PathLike)) and not os.path.exists(source):
         raise FileNotFoundError(
@@ -184,7 +188,6 @@ def load_data(source: PathOrBuffer = DATA_PATH) -> pd.DataFrame:
         raise ValueError(f"CSV is missing required column(s): {missing}")
     df = df[REQUIRED_COLUMNS].copy()
 
-    # Safety check: this tool must only ever analyse synthetic data.
     data_type = df["data_type"].str.strip().str.lower()
     if not (data_type == "synthetic").all():
         raise ValueError(
@@ -192,13 +195,11 @@ def load_data(source: PathOrBuffer = DATA_PATH) -> pd.DataFrame:
             "data that is missing this label or is labelled otherwise."
         )
 
-    # Tidy text columns; blank strings count as missing.
     for col in ["response_id", "province", "theme", "language", "data_type"]:
         df[col] = df[col].str.strip().replace("", np.nan)
     df["data_type"] = "synthetic"
     df["language"] = df["language"].fillna("Unknown")
 
-    # Week must be a whole number; anything else is treated as missing.
     df["week"] = pd.to_numeric(df["week"], errors="coerce")
     df.loc[df["week"] % 1 != 0, "week"] = np.nan
     df["response_date"] = pd.to_datetime(df["response_date"], errors="coerce")
@@ -221,18 +222,16 @@ def calculate_theme_distribution(
     suppress_small_cells: bool = True,
 ) -> pd.DataFrame:
     """
-    Response count and percentage share of each theme, by province and week.
-
-    Columns: province, week, theme, count, total, share_pct, suppressed.
-    `total` is the number of responses in that province-week. When `total` is
-    below `min_sample_size`, `suppressed` is True and (if suppress_small_cells)
-    count and share_pct are set to missing so small groups are not exposed.
+    Response count, percentage share, and 95% credible intervals by province and week.
     """
     dist = _distribution_raw(df)
     dist["suppressed"] = dist["total"] < min_sample_size
+    ci_low, ci_high = compute_credible_interval(dist["count"], dist["total"])
+    dist["ci_lower_pct"] = ci_low
+    dist["ci_upper_pct"] = ci_high
     if suppress_small_cells and not dist.empty:
         dist["count"] = dist["count"].astype("Int64")
-        dist.loc[dist["suppressed"], ["count", "share_pct"]] = np.nan
+        dist.loc[dist["suppressed"], ["count", "share_pct", "ci_lower_pct", "ci_upper_pct"]] = np.nan
     return dist
 
 
@@ -246,10 +245,6 @@ def calculate_weekly_trends(
 ) -> pd.DataFrame:
     """
     Weekly theme percentages per province in wide format (one column per theme).
-
-    Columns: province, week, sample_size, <one column per theme>.
-    Ready for line charts, e.g. filter one province and plot week vs themes.
-    Suppressed province-weeks have NaN percentages.
     """
     dist = calculate_theme_distribution(df, min_sample_size, suppress_small_cells)
     if dist.empty:
@@ -279,15 +274,6 @@ def calculate_baseline(
 ) -> pd.DataFrame:
     """
     Previous four-week average share of each theme, per province.
-
-    The window is the `baseline_weeks` weeks before `latest_week` (default: the
-    latest week in the data, which is excluded from its own baseline). The
-    average is pooled: baseline share = theme responses / all responses over
-    the whole window, so weeks with more responses carry more weight.
-
-    Columns: province, theme, baseline_count, baseline_total,
-    baseline_weeks_with_data, baseline_share_pct. If baseline_total is below
-    `min_sample_size`, count and share are suppressed (NaN).
     """
     columns = ["province", "theme", "baseline_count", "baseline_total",
                "baseline_weeks_with_data", "baseline_share_pct"]
@@ -316,18 +302,6 @@ def detect_changes(
 ) -> pd.DataFrame:
     """
     Compare the latest week's theme share with its previous four-week baseline.
-
-    One row per province x theme. Columns:
-      baseline_share_pct, current_share_pct, change_pp (percentage points),
-      sample_size (responses in the province in the latest week),
-      baseline_total (responses in the baseline window),
-      z_score, p_value, confidence_pct (see the module docstring: one-sided
-      two-proportion z-test; confidence_pct = (1 - p_value) * 100).
-
-    Privacy: if the latest week has fewer than `min_sample_size` responses the
-    current share is hidden; if either the latest week or the baseline has
-    fewer than `min_sample_size` responses, the baseline, change and test
-    results are hidden (NaN).
     """
     raw = _distribution_raw(df)
     if raw.empty:
@@ -347,19 +321,17 @@ def detect_changes(
     out["week"] = latest
     out["change_pp"] = out["current_share_pct"] - out["baseline_share_pct"]
 
-    # One-sided two-proportion z-test (H1: current share > baseline share).
     n1 = out["sample_size"].astype(float).where(out["sample_size"] > 0)
     n2 = out["baseline_total"].astype(float).where(out["baseline_total"] > 0)
     x1 = out["current_count"].astype(float)
     x2 = out["baseline_count"].astype(float)
     pooled = (x1 + x2) / (n1 + n2)
     se = np.sqrt(pooled * (1 - pooled) * (1 / n1 + 1 / n2))
-    se = se.where(se > 0)                       # SE of 0 -> test not computable
+    se = se.where(se > 0)
     out["z_score"] = (x1 / n1 - x2 / n2) / se
     out["p_value"] = pd.Series(norm.sf(out["z_score"]), index=out.index)
     out["confidence_pct"] = (1 - out["p_value"]) * 100
 
-    # Small-cell suppression.
     small_current = out["sample_size"] < min_sample_size
     small_baseline = out["baseline_total"] < min_sample_size
     out.loc[small_current, "current_share_pct"] = np.nan
@@ -382,20 +354,7 @@ def generate_alerts(
     alerts_only: bool = False,
 ) -> pd.DataFrame:
     """
-    Flag simulated signals: a theme whose latest share is at least
-    `min_change_pp` percentage points above its baseline, with sample size
-    >= `min_sample_size`, and a one-sided p-value below `alpha`.
-
-    Returns province, theme, baseline_share_pct, current_share_pct, change_pp,
-    sample_size, alert_status, confidence_pct, p_value, is_alert.
-
-    alert_status is one of:
-      "ALERT"                   all three criteria met
-      "No alert"                reportable, but criteria not met
-      "Suppressed (n < N)"      too few responses in the latest week
-      "Insufficient baseline"   too few responses in the baseline window
-
-    These are simulated signals on synthetic data, not real-world alerts.
+    Flag simulated signals on synthetic data.
     """
     changes = detect_changes(df, latest_week, baseline_weeks, min_sample_size)
     if changes.empty:
@@ -424,18 +383,151 @@ def generate_alerts(
 
 
 # --------------------------------------------------------------------------
-# 7. get_summary
+# 7. Synthetic Stress-Test & Laplace DP Evaluation (Proposal Section 9)
+# --------------------------------------------------------------------------
+def evaluate_surge_detection(
+    sample_sizes: tuple[int, ...] = (50, 95, 150, 250),
+    surge_sizes_pp: tuple[float, ...] = (0.0, 3.0, 5.0, 8.0, 10.0, 15.0),
+    n_trials: int = 250,
+    baseline_share: float = 0.22,
+    watch_pp: float = 3.0,
+    alert_pp: float = 5.0,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Controlled synthetic surge stress-test (Proposal Section 9).
+
+    Simulates 4 baseline weeks with true theme probability `baseline_share`
+    and a test week with `baseline_share + surge_pp / 100`, then measures:
+      - alert_rate_pct : % of trials triggering an ALERT (change >= alert_pp & p < 0.05)
+      - watch_or_alert_rate_pct : % of trials triggering WATCH or ALERT (change >= watch_pp)
+      - mean_detected_change_pp : average estimated percentage-point shift
+    When surge_pp == 0.0, alert_rate_pct is the False-Alarm Rate (target < 20%).
+    """
+    rng = np.random.default_rng(seed)
+    rows = []
+
+    for n in sample_sizes:
+        for surge_pp in surge_sizes_pp:
+            p_base = baseline_share
+            p_curr = min(0.95, max(0.01, baseline_share + surge_pp / 100.0))
+
+            # Shape: (n_trials, 4) for 4 baseline weeks, and (n_trials,) for current week
+            base_counts = rng.binomial(n, p_base, size=(n_trials, 4))
+            curr_counts = rng.binomial(n, p_curr, size=n_trials)
+
+            # Mask cells below k = 10 just like the privacy gate
+            base_pcts = np.where(base_counts >= MIN_SAMPLE_SIZE, 100.0 * base_counts / n, np.nan)
+            curr_pcts = np.where(curr_counts >= MIN_SAMPLE_SIZE, 100.0 * curr_counts / n, np.nan)
+
+            valid_base_n = np.sum(~np.isnan(base_pcts), axis=1)
+            with np.errstate(invalid="ignore"):
+                mean_base = np.nanmean(base_pcts, axis=1)
+                std_base = np.nanstd(base_pcts, axis=1, ddof=1)
+
+            spread = np.maximum(np.where(np.isnan(std_base), 0.0, std_base), 1.0)
+            change = curr_pcts - mean_base
+            z = change / spread
+            p_val = norm.sf(z)
+
+            valid_trial = (valid_base_n >= 2) & (~np.isnan(curr_pcts))
+            is_alert = valid_trial & (change >= alert_pp) & (p_val < 0.05)
+            is_watch_or_alert = valid_trial & (change >= watch_pp)
+
+            rows.append(
+                {
+                    "sample_size_n": int(n),
+                    "injected_surge_pp": float(surge_pp),
+                    "scenario": "No surge (False-alarm check)" if surge_pp == 0 else f"+{surge_pp:.0f} pp surge",
+                    "alert_rate_pct": round(100.0 * float(np.mean(is_alert)), 1),
+                    "watch_or_alert_rate_pct": round(100.0 * float(np.mean(is_watch_or_alert)), 1),
+                    "mean_estimated_change_pp": round(
+                        float(np.nanmean(change)) if np.any(valid_trial) else 0.0, 2
+                    ),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def evaluate_laplace_privacy_cost(
+    safe_df: pd.DataFrame,
+    epsilon_values: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 3.0, 5.0),
+    k: int = MIN_SAMPLE_SIZE,
+    n_trials: int = 40,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Measure the accuracy cost of adding calibrated Laplace(1/epsilon) noise
+    to released aggregate counts on top of k=10 suppression (Proposal Section 6.5 & 9).
+
+    Reports:
+      - epsilon : privacy budget parameter (smaller = stronger privacy, more noise)
+      - scale_b : Laplace scale 1 / epsilon (sensitivity = 1 response per cell)
+      - mae_pp  : Mean Absolute Error in percentage share (percentage points)
+      - rmse_pp : Root Mean Squared Error in percentage share (percentage points)
+      - additional_suppressed_pct : % of previously visible cells pushed below k by noise
+    """
+    vis = safe_df.loc[~safe_df["suppressed"]].copy()
+    if vis.empty:
+        return pd.DataFrame(
+            columns=["epsilon", "scale_b", "mae_pp", "rmse_pp", "additional_suppressed_pct"]
+        )
+
+    counts = vis["response_count"].astype(float).to_numpy()
+    true_pct = vis["percentage_share"].astype(float).to_numpy()
+    group_keys = (
+        vis["region"].astype(str) + "__" + vis["week"].astype(str)
+    ).to_numpy()
+
+    # Map each row to its (region, week) group for fast vectorized normalization
+    unique_groups, group_idx = np.unique(group_keys, return_inverse=True)
+    rng = np.random.default_rng(seed)
+    results = []
+
+    for eps in epsilon_values:
+        scale = 1.0 / float(eps)
+        mae_list = []
+        rmse_list = []
+        newly_suppressed_list = []
+
+        for _ in range(n_trials):
+            noise = rng.laplace(loc=0.0, scale=scale, size=len(counts))
+            noisy_counts = np.maximum(0.0, np.round(counts + noise))
+            newly_suppressed = noisy_counts < k
+            newly_suppressed_list.append(100.0 * float(np.mean(newly_suppressed)))
+
+            group_totals = np.bincount(
+                group_idx, weights=noisy_counts, minlength=len(unique_groups)
+            )
+            row_totals = group_totals[group_idx]
+            noisy_pct = np.where(row_totals > 0, 100.0 * noisy_counts / row_totals, np.nan)
+            diff = np.abs(noisy_pct - true_pct)
+            mae_list.append(float(np.nanmean(diff)))
+            rmse_list.append(float(np.sqrt(np.nanmean((noisy_pct - true_pct) ** 2))))
+
+        results.append(
+            {
+                "epsilon": float(eps),
+                "scale_b": round(scale, 2),
+                "mae_pp": round(float(np.mean(mae_list)), 2),
+                "rmse_pp": round(float(np.mean(rmse_list)), 2),
+                "additional_suppressed_pct": round(float(np.mean(newly_suppressed_list)), 2),
+            }
+        )
+
+    return pd.DataFrame(results)
+
+
+# --------------------------------------------------------------------------
+# 8. get_summary
 # --------------------------------------------------------------------------
 def get_summary(
     df: pd.DataFrame,
     min_sample_size: int = MIN_SAMPLE_SIZE,
 ) -> dict:
     """
-    Overall dashboard statistics as a plain dict (easy to show with st.metric).
-
-    Contains only aggregates: totals, counts by province / theme / language,
-    the latest week, provinces suppressed in the latest week, the number of
-    simulated alerts and the disclaimer text.
+    Overall dashboard statistics as a plain dict.
     """
     _require_columns(df, ["province", "week", "theme", "language", "response_date"])
 
@@ -467,7 +559,6 @@ def get_summary(
         summary["first_date"] = df["response_date"].min().strftime("%Y-%m-%d")
         summary["last_date"] = df["response_date"].max().strftime("%Y-%m-%d")
 
-    # Provinces with too few latest-week responses (includes provinces with none).
     totals = (
         _distribution_raw(df).loc[lambda d: d["week"] == latest]
         .drop_duplicates("province").set_index("province")["total"]
@@ -482,9 +573,6 @@ def get_summary(
     return summary
 
 
-# --------------------------------------------------------------------------
-# Command-line demo (not used by Streamlit)
-# --------------------------------------------------------------------------
 if __name__ == "__main__":
     data = load_data()
     print(DISCLAIMER, "\n")
@@ -497,3 +585,6 @@ if __name__ == "__main__":
     print("\nAlert table (latest week vs previous 4 weeks):")
     with pd.option_context("display.width", 200, "display.max_columns", None):
         print(generate_alerts(data).to_string(index=False))
+
+
+
